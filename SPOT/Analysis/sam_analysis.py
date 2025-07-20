@@ -1808,6 +1808,55 @@ def get_labels_for_trajectory( all_object_trajectories,
     return all_object_label_trajectories
 
 
+def compute_phenotype_cluster_transitions_from_label_trajectories(all_object_label_trajectories,
+                                                                  all_cluster_labels,
+                                                                  pseudocounts=1):
+    r""" computer Pr(cluster_j at time t+1 | cluster_i at time t) based on frequency statistics, equivalent to beta-dirichlet stats
+    
+    Parameters
+    ----------
+    all_object_label_trajectories : list
+        list of all trajectories, where the object instances in each trajectory are given by their index in the table 
+    all_cluster_labels : (N_objects,) array
+        the phenotype cluster label of each object instance 
+    pseudocounts : float
+        normalization count
+        
+    Returns
+    -------
+    all_models : list of [transition_matrix, transition_counts_matrix] per condition. 
+    
+    """
+    import numpy as np 
+    
+    all_uniq_cluster_labels = np.unique(all_cluster_labels) # find the number of unique clusters used to setup the transition matrix.
+    n_labels = len(all_uniq_cluster_labels)
+    
+    all_models = []
+    
+    for condition_ii in np.arange(len(all_object_label_trajectories)):
+        
+        all_label_seqs = list(all_object_label_trajectories[condition_ii]) # array of integer label
+        
+        transition_counts = np.zeros((n_labels, n_labels)) + pseudocounts # add this count uniformly 
+        
+        # iterate over the sequences
+        for lab_seq_ii in np.arange(len(all_label_seqs)):
+            label_seq = all_label_seqs[lab_seq_ii]
+            
+            label_seq_t = np.hstack(label_seq[1:]).copy()
+            label_seq_t_plus_1 = np.hstack(label_seq[:-1]).copy()
+            
+            for tttt in np.arange(len(label_seq_t)):
+                transition_counts[label_seq_t[tttt],
+                                  label_seq_t_plus_1[tttt]] += 1 # add counts to the table. 
+            
+        transition_probs = transition_counts/(transition_counts.sum(axis=1)[:,None]) # divide by the sum of the columns to have row normalization
+        all_models.append([transition_probs, transition_counts])
+        
+    return all_models
+    
+
 def fit_categoricalHMM_model_to_phenotype_cluster_label_trajectories( all_object_label_trajectories,
                                                                      all_cluster_labels,
                                                                      hmm_algorithm = 'map', 
@@ -1832,6 +1881,7 @@ def fit_categoricalHMM_model_to_phenotype_cluster_label_trajectories( all_object
     Returns
     -------
     all_models : list of [transition_matrix, hmmlearn model object] per condition. 
+    all_reorder : list of reordering used internally to bring HMM states into alignment with phenotype cluster labels
     
     """
     from hmmlearn.hmm import CategoricalHMM 
