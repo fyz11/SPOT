@@ -1808,10 +1808,30 @@ def get_labels_for_trajectory( all_object_trajectories,
     return all_object_label_trajectories
 
 
+def _ma_smooth_label(label_seq, 
+                     winsize=3):
+    
+    import numpy as np 
+    import scipy.stats as spstats
+    
+    label_seq_pad = np.pad(label_seq, [winsize//2, winsize//2], mode='reflect')
+    
+    label_seq_out = []
+    
+    for ii in np.arange(len(label_seq)):
+        data = label_seq_pad[ii:ii+winsize]
+        label_seq_out.append(spstats.mode(data)[0])
+    
+    label_seq_out = np.hstack(label_seq_out)
+    
+    return label_seq_out
+
+
 def compute_phenotype_cluster_transitions_from_label_trajectories(all_object_label_trajectories,
                                                                   all_cluster_labels,
                                                                   pseudocounts=1,
                                                                   time_interval = 1,
+                                                                  smooth_label_win=3,
                                                                   diffs_only=True):
     r""" computer Pr(cluster_j at time t+1 | cluster_i at time t) based on frequency statistics, equivalent to beta-dirichlet stats
    
@@ -1845,6 +1865,9 @@ def compute_phenotype_cluster_transitions_from_label_trajectories(all_object_lab
         # iterate over the sequences
         for lab_seq_ii in np.arange(len(all_label_seqs)):
             label_seq = all_label_seqs[lab_seq_ii]
+            
+            if smooth_label_win > 0: 
+                label_seq = _ma_smooth_label(label_seq, winsize=smooth_label_win)
            
             if len(label_seq)>=1+time_interval:
                 # label_seq_t = np.hstack(label_seq[1:]).copy()
