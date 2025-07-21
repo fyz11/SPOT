@@ -1810,50 +1810,72 @@ def get_labels_for_trajectory( all_object_trajectories,
 
 def compute_phenotype_cluster_transitions_from_label_trajectories(all_object_label_trajectories,
                                                                   all_cluster_labels,
-                                                                  pseudocounts=1):
+                                                                  pseudocounts=1,
+                                                                  time_interval = 1,
+                                                                  diffs_only=True):
     r""" computer Pr(cluster_j at time t+1 | cluster_i at time t) based on frequency statistics, equivalent to beta-dirichlet stats
-    
+   
     Parameters
     ----------
     all_object_label_trajectories : list
-        list of all trajectories, where the object instances in each trajectory are given by their index in the table 
+        list of all trajectories, where the object instances in each trajectory are given by their index in the table
     all_cluster_labels : (N_objects,) array
-        the phenotype cluster label of each object instance 
+        the phenotype cluster label of each object instance
     pseudocounts : float
         normalization count
-        
+       
     Returns
     -------
-    all_models : list of [transition_matrix, transition_counts_matrix] per condition. 
-    
+    all_models : list of [transition_matrix, transition_counts_matrix] per condition.
+   
     """
-    import numpy as np 
-    
+    import numpy as np
+   
     all_uniq_cluster_labels = np.unique(all_cluster_labels) # find the number of unique clusters used to setup the transition matrix.
     n_labels = len(all_uniq_cluster_labels)
-    
+   
     all_models = []
-    
+   
     for condition_ii in np.arange(len(all_object_label_trajectories)):
-        
+       
         all_label_seqs = list(all_object_label_trajectories[condition_ii]) # array of integer label
-        
-        transition_counts = np.zeros((n_labels, n_labels)) + pseudocounts # add this count uniformly 
-        
+       
+        transition_counts = np.ones((n_labels, n_labels)) * pseudocounts # add this count uniformly
+       
         # iterate over the sequences
         for lab_seq_ii in np.arange(len(all_label_seqs)):
             label_seq = all_label_seqs[lab_seq_ii]
-            
-            label_seq_t = np.hstack(label_seq[1:]).copy()
-            label_seq_t_plus_1 = np.hstack(label_seq[:-1]).copy()
-            
-            for tttt in np.arange(len(label_seq_t)):
-                transition_counts[label_seq_t[tttt],
-                                  label_seq_t_plus_1[tttt]] += 1 # add counts to the table. 
-            
+           
+            if len(label_seq)>=1+time_interval:
+                # label_seq_t = np.hstack(label_seq[1:]).copy()
+                # label_seq_t_plus_1 = np.hstack(label_seq[:-1]).copy()
+               
+                label_seq_tt = np.vstack([label_seq[time_interval-ppp:len(label_seq)-ppp][None,...] for ppp in np.arange(time_interval+1)])
+                # should be an array the same number.
+               
+                # we only tabulate the entries for which the second is different
+                # for tttt in np.arange(len(label_seq_t)):
+                for tttt in np.arange(label_seq_tt.shape[1]):
+                    if diffs_only==True:
+                        # if label_seq_t[tttt]!= label_seq_t_plus_1[tttt]:
+                        if np.max(label_seq_tt[:,tttt]) - np.min(label_seq_tt[:,tttt]) > 0:
+                            # transition_counts[label_seq_t[tttt],
+                            #                   label_seq_t_plus_1[tttt]] += 1
+                            for labbb in np.setdiff1d(label_seq_tt[:,tttt], label_seq_tt[0,tttt]):
+                                transition_counts[label_seq_tt[0,tttt],
+                                                  labbb] += 1
+                    else:
+                        # transition_counts[label_seq_t[tttt],
+                                          # label_seq_t_plus_1[tttt]] += 1 # add counts to the table.
+                   
+                        for xxx in np.arange(time_interval):
+                            transition_counts[label_seq_tt[0,tttt],
+                                              label_seq_tt[xxx+1,tttt]] += 1 # add counts to the table.
+                           
+
         transition_probs = transition_counts/(transition_counts.sum(axis=1)[:,None]) # divide by the sum of the columns to have row normalization
         all_models.append([transition_probs, transition_counts])
-        
+       
     return all_models
     
 
@@ -2090,6 +2112,7 @@ def entropy_transition_matrix(trans_mat,
 ### automatic drawing of the hmm graph with edges colored by probability. 
 def draw_HMM_transition_graph(trans_table, ax, node_colors=None, 
                               edgescale=10, edgelabelpos=1., 
+                              pow_scale=1.,
                               figsize=(10,10), 
                               savefile=None):
     r""" Draw a given Markov transition table as a graph diagram. Nodes are organized as a circle of fixed radius
@@ -2104,6 +2127,8 @@ def draw_HMM_transition_graph(trans_table, ax, node_colors=None,
         the desired color to color each graph node. If None, the default is the Spectral colormap
     edgescale : int
         controls the width of the arrows
+    pow_scale : float
+        raise the transition matrix entries by this exponent, to enhance the strongest transitions.
     edgelabelpos : float
         controls the distance away from the center that graph nodes are drawn at. 
     figsize : 2-tuple
@@ -2116,63 +2141,69 @@ def draw_HMM_transition_graph(trans_table, ax, node_colors=None,
     None
 
     """
+
     from hmmviz import TransGraph
     import numpy as np 
     import pylab as plt 
     import pandas as pd 
     import seaborn as sns 
-    
+   
     # if array first cast to table. 
     if isinstance(trans_table, pd.DataFrame):
         transition_table = trans_table.copy()
     else:
         transition_table = pd.DataFrame(np.array(trans_table),
-                                        index=np.arange(len(trans_table)), 
-                                        columns=np.arange(len(trans_table)))
-
-    node_list = np.arange(len(trans_table))
-
+                                        index=np.arange(len(trans_table))+1, 
+                                        columns=np.arange(len(trans_table))+1)
+        
+    node_list = np.arange(len(trans_table)) + 1
+    
     graph = TransGraph(transition_table)
     trans_table_prob = transition_table.values.copy()
-        
+    
+    
     fig, ax = plt.subplots(figsize=figsize)
 
     nodelabels = {ii:ii for ii in node_list}
-
+    
     if node_colors is None:
         node_colors = sns.color_palette('Spectral', len(node_list)) # create a default. 
-            
-    colors = {ii: node_colors[ii] for ii in np.arange(len(node_list))}
     
-    # edgecolors = {('sunny','rainy'): 'orange', 
+    colors = {ii: node_colors[ii-1] for ii in node_list}
+   
+    # print(colors)
+    # print(nodelabels)
+    # nodelabels = {ii:ii for ii in uniq_clust_labels+1}
+    # colors = {ii+1:clust_labels_colors[ii] for ii in uniq_clust_labels}
+   
+    # edgecolors = {('sunny','rainy'): 'orange',
     #            ('sunny','sunny'): 'red',
     #            ('rainy','sunny'): (1,1,0,0.5),
     #            ('rainy','rainy'): (1,1,0,0.1)} # this works?
     edgecolors = {} # this works?  
     for ii in np.arange(len(node_list)):
         for jj in np.arange(len(node_list)):
-            edge = (ii,jj)
-            color = np.hstack([colors[ii], trans_table_prob[ii,jj]])
+            edge = (ii+1,jj+1)
+            color = np.hstack([colors[ii+1], trans_table_prob[ii,jj]**pow_scale])
             # print(edge, color)
             edgecolors[edge] = color
     # print(edgecolors)
-    
-    graph.draw(ax=ax, 
+   
+    graph.draw(ax=ax,
                # r=2,
-        nodelabels=nodelabels, 
-        nodecolors=colors, 
-        edgecolors=edgecolors, 
+        nodelabels=nodelabels,
+        nodecolors=colors,
+        edgecolors=edgecolors,
         edgelabels=False,
         edgewidths = 20,
         edgescale=edgescale,
         edgelabelpos=edgelabelpos,
         nodefontsize=16)
-    
+   
     # plt.show()
     if savefile is not None:
-        fig.savefig(savefile, 
+        fig.savefig(savefile,
                     dpi=300, bbox_inches='tight')
-        
+       
     return [] 
-    
 
