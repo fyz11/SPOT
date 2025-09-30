@@ -1828,79 +1828,104 @@ def _ma_smooth_label(label_seq,
 
 
 def compute_phenotype_cluster_transitions_from_label_trajectories(all_object_label_trajectories,
-                                                                  all_cluster_labels,
-                                                                  pseudocounts=1,
-                                                                  time_interval = 1,
-                                                                  smooth_label_win=3,
-                                                                  diffs_only=True):
-    r""" computer Pr(cluster_j at time t+1 | cluster_i at time t) based on frequency statistics, equivalent to beta-dirichlet stats
-   
-    Parameters
-    ----------
-    all_object_label_trajectories : list
-        list of all trajectories, where the object instances in each trajectory are given by their index in the table
-    all_cluster_labels : (N_objects,) array
-        the phenotype cluster label of each object instance
-    pseudocounts : float
-        normalization count
+                                                                      all_cluster_labels,
+                                                                      pseudocounts=0,
+                                                                      time_interval = 1,
+                                                                      smooth_label_win=0,
+                                                                      switch_time=False, 
+                                                                      diffs_only=False):
+        r""" computer Pr(cluster_j at time t+1 | cluster_i at time t) based on frequency statistics, equivalent to beta-dirichlet stats
        
-    Returns
-    -------
-    all_models : list of [transition_matrix, transition_counts_matrix] per condition.
-   
-    """
-    import numpy as np
-   
-    all_uniq_cluster_labels = np.unique(all_cluster_labels) # find the number of unique clusters used to setup the transition matrix.
-    n_labels = len(all_uniq_cluster_labels)
-   
-    all_models = []
-   
-    for condition_ii in np.arange(len(all_object_label_trajectories)):
-       
-        all_label_seqs = list(all_object_label_trajectories[condition_ii]) # array of integer label
-       
-        transition_counts = np.ones((n_labels, n_labels)) * pseudocounts # add this count uniformly
-       
-        # iterate over the sequences
-        for lab_seq_ii in np.arange(len(all_label_seqs)):
-            label_seq = all_label_seqs[lab_seq_ii]
-            
-            if smooth_label_win > 0: 
-                label_seq = _ma_smooth_label(label_seq, winsize=smooth_label_win)
+        Parameters
+        ----------
+        all_object_label_trajectories : list
+            list of all trajectories, where the object instances in each trajectory are given by their index in the table
+        all_cluster_labels : (N_objects,) array
+            the phenotype cluster label of each object instance
+        pseudocounts : float
+            normalization count
+        time_interval : int
+            the length of the next timepoint interval to consider. this is typically the next frame i.e. 1
+        smooth_label_win : int
+            if greater than 0, it is the rolling window to perform majority label voting to smooth label trajectories. if 0, no smoothing is applied.
+        switch_time : bool
+            if True, computes the backward time probability matrix i.e. p(state at time t | state at time t+1)
+        diffs_only : bool
+            if True, excludes self transitions in computing the transition matrix  
            
-            if len(label_seq)>=1+time_interval:
-                # label_seq_t = np.hstack(label_seq[1:]).copy()
-                # label_seq_t_plus_1 = np.hstack(label_seq[:-1]).copy()
-               
-                label_seq_tt = np.vstack([label_seq[time_interval-ppp:len(label_seq)-ppp][None,...] for ppp in np.arange(time_interval+1)])
-                # should be an array the same number.
-               
-                # we only tabulate the entries for which the second is different
-                # for tttt in np.arange(len(label_seq_t)):
-                for tttt in np.arange(label_seq_tt.shape[1]):
-                    if diffs_only==True:
-                        # if label_seq_t[tttt]!= label_seq_t_plus_1[tttt]:
-                        if np.max(label_seq_tt[:,tttt]) - np.min(label_seq_tt[:,tttt]) > 0:
-                            # transition_counts[label_seq_t[tttt],
-                            #                   label_seq_t_plus_1[tttt]] += 1
-                            for labbb in np.setdiff1d(label_seq_tt[:,tttt], label_seq_tt[0,tttt]):
-                                transition_counts[label_seq_tt[0,tttt],
-                                                  labbb] += 1
-                    else:
-                        # transition_counts[label_seq_t[tttt],
-                                          # label_seq_t_plus_1[tttt]] += 1 # add counts to the table.
-                   
-                        for xxx in np.arange(time_interval):
-                            transition_counts[label_seq_tt[0,tttt],
-                                              label_seq_tt[xxx+1,tttt]] += 1 # add counts to the table.
-                           
-
-        transition_probs = transition_counts/(transition_counts.sum(axis=1)[:,None]) # divide by the sum of the columns to have row normalization
-        all_models.append([transition_probs, transition_counts])
+        Returns
+        -------
+        all_models : list of [transition_matrix, transition_counts_matrix] per condition.
        
-    return all_models
-    
+        """
+        import numpy as np
+       
+        all_uniq_cluster_labels = np.unique(all_cluster_labels) # find the number of unique clusters used to setup the transition matrix.
+        n_labels = len(all_uniq_cluster_labels)
+       
+        all_models = []
+       
+        for condition_ii in np.arange(len(all_object_label_trajectories)):
+           
+            all_label_seqs = list(all_object_label_trajectories[condition_ii]) # array of integer label
+           
+            transition_counts = np.ones((n_labels, n_labels)) * pseudocounts # add this count uniformly
+            print(transition_counts.shape)
+           
+            # iterate over the sequences
+            for lab_seq_ii in np.arange(len(all_label_seqs)):
+                label_seq = all_label_seqs[lab_seq_ii]
+                
+                if smooth_label_win > 0: 
+                    label_seq = _ma_smooth_label(label_seq, winsize=smooth_label_win)
+               
+                if len(label_seq)>=1+time_interval:
+                    # label_seq_t = np.hstack(label_seq[1:]).copy()
+                    # label_seq_t_plus_1 = np.hstack(label_seq[:-1]).copy()
+                   
+                    ### Oh.... this is the bug!. (need to reverse this!)
+                    label_seq_tt = np.vstack([label_seq[time_interval-ppp:len(label_seq)-ppp][None,...] for ppp in np.arange(time_interval+1)])
+                    label_seq_tt = label_seq_tt[::-1].copy() 
+
+                    if switch_time:
+                        label_seq_tt = label_seq_tt[::-1].copy() 
+                    # should be an array the same number.
+                    
+                    # print('---')
+                    # print(label_seq[:6])
+                    # print(label_seq_tt[0,:5], label_seq_tt[1,:5])
+                    # print('---')
+                   
+                    # we only tabulate the entries for which the second is different
+                    # for tttt in np.arange(len(label_seq_t)):
+                    for tttt in np.arange(label_seq_tt.shape[1]):
+                        if diffs_only==True:
+                            # # if label_seq_t[tttt]!= label_seq_t_plus_1[tttt]:
+                            # if np.max(label_seq_tt[:,tttt]) - np.min(label_seq_tt[:,tttt]) > 0:
+                            #     # transition_counts[label_seq_t[tttt],
+                            #     #                   label_seq_t_plus_1[tttt]] += 1
+                            #     for labbb in np.setdiff1d(label_seq_tt[:,tttt], label_seq_tt[0,tttt]):
+                            #         transition_counts[label_seq_tt[0,tttt],
+                            #                           labbb] += 1
+                            # maybe nothing fancy? 
+                            if label_seq_tt[0,tttt]!= label_seq_tt[1,tttt]:
+                                transition_counts[label_seq_tt[0,tttt],
+                                                  label_seq_tt[1,tttt]] += 1
+                        else:
+                            # transition_counts[label_seq_t[tttt],
+                                              # label_seq_t_plus_1[tttt]] += 1 # add counts to the table.
+                       
+                            for xxx in np.arange(time_interval):
+                                transition_counts[label_seq_tt[0,tttt],
+                                                  label_seq_tt[xxx+1,tttt]] += 1 # add counts to the table.
+                               
+            # this is wrong..? 
+            transition_probs = transition_counts/(transition_counts.sum(axis=1)[:,None]) # divide by the sum of the columns to have row normalization
+            all_models.append([transition_probs, transition_counts])
+           
+        return all_models
+
+
 
 def fit_categoricalHMM_model_to_phenotype_cluster_label_trajectories( all_object_label_trajectories,
                                                                      all_cluster_labels,
@@ -2132,101 +2157,219 @@ def entropy_transition_matrix(trans_mat,
     return trans_mat_entropy
 
 
-### automatic drawing of the hmm graph with edges colored by probability. 
-def draw_HMM_transition_graph(trans_table, ax, node_colors=None, 
-                              edgescale=10, edgelabelpos=1., 
+
+
+
+def draw_HMM_transition_graph(trans_table, 
+                              ax, 
+                              node_colors=None, 
+                              edgescale=10, 
+                              edgelabelpos=1., 
                               pow_scale=1.,
-                              figsize=(10,10), 
+                              figsize=(10,10),
+                              clip_val = 0.5,
+                              implement_clip = False,
                               savefile=None):
-    r""" Draw a given Markov transition table as a graph diagram. Nodes are organized as a circle of fixed radius
-
-    Parameters
-    ----------
-    trans_table : pandas.DataFrame or 2D numpy array 
-        Markov transition table where each row sums to 1, giving the probability of transition from row i to column j. 
-    ax : Matplotlib axes object
-        this is the character separator used to separate the meta information in the unique object id.
-    node_colors : list or array
-        the desired color to color each graph node. If None, the default is the Spectral colormap
-    edgescale : int
-        controls the width of the arrows
-    pow_scale : float
-        raise the transition matrix entries by this exponent, to enhance the strongest transitions.
-    edgelabelpos : float
-        controls the distance away from the center that graph nodes are drawn at. 
-    figsize : 2-tuple
-        size of the matplotlib plot
-    savefile : str
-        if specified, the displayed image will be saved to this path. 
-
-    Returns
-    -------
-    None
-
-    """
-
-    from hmmviz import TransGraph
-    import numpy as np 
-    import pylab as plt 
-    import pandas as pd 
-    import seaborn as sns 
-   
-    # if array first cast to table. 
-    if isinstance(trans_table, pd.DataFrame):
-        transition_table = trans_table.copy()
-    else:
-        transition_table = pd.DataFrame(np.array(trans_table),
-                                        index=np.arange(len(trans_table))+1, 
-                                        columns=np.arange(len(trans_table))+1)
-        
-    node_list = np.arange(len(trans_table)) + 1
+        r""" Draw a given Markov transition table as a graph diagram. Nodes are organized as a circle of fixed radius
     
-    graph = TransGraph(transition_table)
-    trans_table_prob = transition_table.values.copy()
+        Parameters
+        ----------
+        trans_table : pandas.DataFrame or 2D numpy array 
+            Markov transition table where each row sums to 1, giving the probability of transition from row i to column j. 
+        ax : Matplotlib axes object
+            this is the character separator used to separate the meta information in the unique object id.
+        node_colors : list or array
+            the desired color to color each graph node. If None, the default is the Spectral colormap
+        edgescale : int
+            controls the width of the arrows
+        edgelabelpos : float
+            controls the distance away from the center that graph nodes are drawn at. 
+        pow_scale : float
+            raise the transition matrix entries by this exponent, to enhance the strongest transitions.
+        figsize : 2-tuple
+            size of the matplotlib plot
+        clip_val : float, 0-1
+            the saturating value for drawing the arrow. the color map will then be applied to [0,clip_val] for all states
+        implement_clip : bool
+            whether the apply the upper bound on the probability matrix given by clip_val
+        savefile : str
+            if specified, the displayed image will be saved to this path. 
     
+        Returns
+        -------
+        None
     
-    fig, ax = plt.subplots(figsize=figsize)
-
-    nodelabels = {ii:ii for ii in node_list}
+        """
     
-    if node_colors is None:
-        node_colors = sns.color_palette('Spectral', len(node_list)) # create a default. 
-    
-    colors = {ii: node_colors[ii-1] for ii in node_list}
-   
-    # print(colors)
-    # print(nodelabels)
-    # nodelabels = {ii:ii for ii in uniq_clust_labels+1}
-    # colors = {ii+1:clust_labels_colors[ii] for ii in uniq_clust_labels}
-   
-    # edgecolors = {('sunny','rainy'): 'orange',
-    #            ('sunny','sunny'): 'red',
-    #            ('rainy','sunny'): (1,1,0,0.5),
-    #            ('rainy','rainy'): (1,1,0,0.1)} # this works?
-    edgecolors = {} # this works?  
-    for ii in np.arange(len(node_list)):
-        for jj in np.arange(len(node_list)):
-            edge = (ii+1,jj+1)
-            color = np.hstack([colors[ii+1], trans_table_prob[ii,jj]**pow_scale])
-            # print(edge, color)
-            edgecolors[edge] = color
-    # print(edgecolors)
-   
-    graph.draw(ax=ax,
-               # r=2,
-        nodelabels=nodelabels,
-        nodecolors=colors,
-        edgecolors=edgecolors,
-        edgelabels=False,
-        edgewidths = 20,
-        edgescale=edgescale,
-        edgelabelpos=edgelabelpos,
-        nodefontsize=16)
-   
-    # plt.show()
-    if savefile is not None:
-        fig.savefig(savefile,
-                    dpi=300, bbox_inches='tight')
+        from hmmviz import TransGraph
+        import numpy as np 
+        import pylab as plt 
+        import pandas as pd 
+        import seaborn as sns 
        
-    return [] 
+        # if array first cast to table. 
+        if isinstance(trans_table, pd.DataFrame):
+            transition_table = trans_table.copy()
+        else:
+            transition_table = pd.DataFrame(np.array(trans_table),
+                                            index=np.arange(len(trans_table))+1, 
+                                            columns=np.arange(len(trans_table))+1)
+            
+        node_list = np.arange(len(trans_table)) + 1
+        
+        graph = TransGraph(transition_table)
+        trans_table_prob = transition_table.values.copy()
+        
+        
+        fig, ax = plt.subplots(figsize=figsize)
+    
+        nodelabels = {ii:ii for ii in node_list}
+        
+        if node_colors is None:
+            node_colors = sns.color_palette('Spectral', len(node_list)) # create a default. 
+        
+        colors = {ii: node_colors[ii-1] for ii in node_list}
+       
+        # print(colors)
+        # print(nodelabels)
+        # nodelabels = {ii:ii for ii in uniq_clust_labels+1}
+        # colors = {ii+1:clust_labels_colors[ii] for ii in uniq_clust_labels}
+       
+        # edgecolors = {('sunny','rainy'): 'orange',
+        #            ('sunny','sunny'): 'red',
+        #            ('rainy','sunny'): (1,1,0,0.5),
+        #            ('rainy','rainy'): (1,1,0,0.1)} # this works?
+        
+        trans_table_prob = trans_table_prob ** pow_scale
+        
+        if implement_clip:
+            trans_table_prob = np.clip(trans_table_prob / (clip_val**pow_scale), 0, 1)
+        
+        
+        edgecolors = {} # this works?  
+        for ii in np.arange(len(node_list)):
+            for jj in np.arange(len(node_list)):
+                edge = (ii+1,jj+1)
+                # color = np.hstack([colors[ii+1], trans_table_prob[ii,jj]**pow_scale])
+                color = np.hstack([colors[ii+1], trans_table_prob[ii,jj]])
+                # print(edge, color)
+                edgecolors[edge] = color
+        # print(edgecolors)
+       
+        graph.draw(ax=ax,
+                   # r=2,
+            nodelabels=nodelabels,
+            nodecolors=colors,
+            edgecolors=edgecolors,
+            edgelabels=False,
+            edgewidths = 20,
+            edgescale=edgescale,
+            edgelabelpos=edgelabelpos,
+            nodefontsize=16)
+       
+        # plt.show()
+        if savefile is not None:
+            fig.savefig(savefile,
+                        dpi=300, bbox_inches='tight')
+           
+        return [] 
+
+
+### automatic drawing of the hmm graph with edges colored by probability. 
+# def draw_HMM_transition_graph(trans_table, ax, node_colors=None, 
+#                               edgescale=10, edgelabelpos=1., 
+#                               pow_scale=1.,
+#                               figsize=(10,10), 
+#                               savefile=None):
+#     r""" Draw a given Markov transition table as a graph diagram. Nodes are organized as a circle of fixed radius
+
+#     Parameters
+#     ----------
+#     trans_table : pandas.DataFrame or 2D numpy array 
+#         Markov transition table where each row sums to 1, giving the probability of transition from row i to column j. 
+#     ax : Matplotlib axes object
+#         this is the character separator used to separate the meta information in the unique object id.
+#     node_colors : list or array
+#         the desired color to color each graph node. If None, the default is the Spectral colormap
+#     edgescale : int
+#         controls the width of the arrows
+#     pow_scale : float
+#         raise the transition matrix entries by this exponent, to enhance the strongest transitions.
+#     edgelabelpos : float
+#         controls the distance away from the center that graph nodes are drawn at. 
+#     figsize : 2-tuple
+#         size of the matplotlib plot
+#     savefile : str
+#         if specified, the displayed image will be saved to this path. 
+
+#     Returns
+#     -------
+#     None
+
+#     """
+
+#     from hmmviz import TransGraph
+#     import numpy as np 
+#     import pylab as plt 
+#     import pandas as pd 
+#     import seaborn as sns 
+   
+#     # if array first cast to table. 
+#     if isinstance(trans_table, pd.DataFrame):
+#         transition_table = trans_table.copy()
+#     else:
+#         transition_table = pd.DataFrame(np.array(trans_table),
+#                                         index=np.arange(len(trans_table))+1, 
+#                                         columns=np.arange(len(trans_table))+1)
+        
+#     node_list = np.arange(len(trans_table)) + 1
+    
+#     graph = TransGraph(transition_table)
+#     trans_table_prob = transition_table.values.copy()
+    
+    
+#     fig, ax = plt.subplots(figsize=figsize)
+
+#     nodelabels = {ii:ii for ii in node_list}
+    
+#     if node_colors is None:
+#         node_colors = sns.color_palette('Spectral', len(node_list)) # create a default. 
+    
+#     colors = {ii: node_colors[ii-1] for ii in node_list}
+   
+#     # print(colors)
+#     # print(nodelabels)
+#     # nodelabels = {ii:ii for ii in uniq_clust_labels+1}
+#     # colors = {ii+1:clust_labels_colors[ii] for ii in uniq_clust_labels}
+   
+#     # edgecolors = {('sunny','rainy'): 'orange',
+#     #            ('sunny','sunny'): 'red',
+#     #            ('rainy','sunny'): (1,1,0,0.5),
+#     #            ('rainy','rainy'): (1,1,0,0.1)} # this works?
+#     edgecolors = {} # this works?  
+#     for ii in np.arange(len(node_list)):
+#         for jj in np.arange(len(node_list)):
+#             edge = (ii+1,jj+1)
+#             color = np.hstack([colors[ii+1], trans_table_prob[ii,jj]**pow_scale])
+#             # print(edge, color)
+#             edgecolors[edge] = color
+#     # print(edgecolors)
+   
+#     graph.draw(ax=ax,
+#                # r=2,
+#         nodelabels=nodelabels,
+#         nodecolors=colors,
+#         edgecolors=edgecolors,
+#         edgelabels=False,
+#         edgewidths = 20,
+#         edgescale=edgescale,
+#         edgelabelpos=edgelabelpos,
+#         nodefontsize=16)
+   
+#     # plt.show()
+#     if savefile is not None:
+#         fig.savefig(savefile,
+#                     dpi=300, bbox_inches='tight')
+       
+#     return [] 
 
