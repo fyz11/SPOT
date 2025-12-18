@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+ 
+ 
+[tool.setuptools]
+packages = ["SPOT",
+            "SPOT.Analysis",
+            "SPOT.Detection", 
+            "SPOT.Features", 
+            "SPOT.Image",
+            "SPOT.Registration", 
+            "SPOT.Tracking",
+            "SPOT.Utility_Functions"]
+  
+[project]
+name="SAM-SPOT"
+description="Shape, appearance, motion Phenotype Observation Tool for streamlined live-cell phenotyping temporal analysis"
+authors = [{name='Felix Y. Zhou', email='felixzhou1@gmail.com'}]
+readme = "README.md"
+license={text = "LICR Software License"}
+version = "0.1.1"
+classifiers = [
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+]
+
+
+# updating the requires python in line with optimesh
+requires-python = ">3.9, <3.11"
+dependencies = [
+    'numpy>=1.23,<2.0',
+    'contourpy<=1.2.0',
+    'tensorflow-gpu==2.10.*',
+	'pillow',
+	'mahotas',
+    'matplotlib',
+    'scikit-image',
+    'scikit-learn',
+    'scipy',
+    'opencv-contrib-python==4.5.*',
+	'tqdm',
+    'tifffile',
+    'seaborn',
+    'networkx',
+    'hmmviz',
+    'hmmlearn',
+    'pandas',
+    'statsmodels', 
+    'umap-learn<=0.5.6',
+    'fastcluster',
+    'imagecodecs',
+    'dtaidistance',
+    'pacmap'
+    ]
+
+[project.urls]
+Homepage = "https://github.com/fyz11/SPOT"
+Issues = "https://github.com/fyz11/SPOT/issues"
