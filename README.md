@@ -142,8 +142,10 @@ make html
 
 <!-- TOC --><a name="to-install"></a>
 ## To install
-The package can be installed automatically using pip after cloning the repository. It has been tested for Python >=3.8. Installation time in mins :
+The package can be installed automatically using pip after cloning the repository. It has been tested and working for Python 3.9 and 3.10. Installation time in mins. We recommend installing into a new conda environment, and preinstalling the annoy package from conda-forge required to use pacmap instead of umap for dimensionality reduction:
 ```shell
+conda create -n SAM-SPOT_env python=3.9
+conda install -n SAM-SPOT_env -c conda-forge python-annoy
 pip install .
 ```
 You can also install directly from the github without cloning, but will still need to manually download the pretrained model weights:
