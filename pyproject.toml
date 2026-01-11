@@ -54,9 +54,11 @@ dependencies = [
     'umap-learn<=0.5.6',
     'fastcluster',
     'imagecodecs',
-    'dtaidistance',
-    'pacmap'
+    'dtaidistance'
     ]
+
+[project.optional-dependencies]
+pacmap = ["pacmap"]
 
 [project.urls]
 Homepage = "https://github.com/fyz11/SPOT"
