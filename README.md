@@ -21,6 +21,11 @@
 
 <!-- TOC end -->
 
+#### Jan 2026
+- Tutorial video for installing SPOT, [link](https://www.dropbox.com/scl/fi/yyebz7clz4m46791zigj6/SPOT-tutorial.mp4?rlkey=aio3zsr33l4szh8gk4290ku1a&e=1&st=sw9ist2l&dl=0)
+- added optional dependency to install `pacmap`. Requires externally installing from conda-forge the `python-annoy` package. 
+
+
 <!-- TOC --><a name="introduction-to-spot"></a>
 ## Introduction to SPOT
 SPOT is a generalized and streamlined workflow for analysing object dynamics in movies. It is designed to suit high-content imaging applications where analytical tools should be push-and-go and require no prior knowledge of the expected behaviour of the objects to be studied. In other words, users should be able to run through all the steps in one go, then retrospectively interpret the produced results. This workflow is inspired by that for single-cell sequencing and is summarized in the figure above. 
@@ -142,7 +147,7 @@ make html
 
 <!-- TOC --><a name="to-install"></a>
 ## To install
-The package can be installed automatically using pip after cloning the repository. It has been tested and working for Python 3.9 and 3.10. Installation time in mins. We recommend installing into a new conda environment, and preinstalling the annoy package from conda-forge required to use pacmap instead of umap for dimensionality reduction:
+The package can be installed automatically using pip after cloning the repository. It has been tested and working for Python 3.9 and 3.10. Installation time in mins. We recommend installing into a new conda environment, and preinstalling the annoy package from conda-forge if you want to use pacmap instead of umap for dimensionality reduction:
 ```shell
 conda create -n SAM-SPOT_env python=3.9
 conda install -n SAM-SPOT_env -c conda-forge python-annoy
