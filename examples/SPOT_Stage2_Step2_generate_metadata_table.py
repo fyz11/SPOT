@@ -23,7 +23,7 @@ if __name__=="__main__":
     """
     Specify the top level folder of the video dataset
     """
-    masterimgfolder = r'../data/organoids/fluorescent_murine_colon'
+    masterimgfolder = r'./data/organoids/fluorescent_murine_colon'
     
     """
     specify the movie extension 

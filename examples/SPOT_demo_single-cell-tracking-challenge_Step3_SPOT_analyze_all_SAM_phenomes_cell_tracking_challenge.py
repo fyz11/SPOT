@@ -60,10 +60,10 @@ if __name__=="__main__":
     import SPOT.Utility_Functions.plotting as plotting
     
     
-    rootfolder = r'C:\Users\fyz11\Documents\Work\Projects\Lu-Organoids\Paper\Suppl_GitHub_Code\SPOT\data\cell_tracking'
+    rootfolder = r'./data/cell_tracking'
     saverootfolder = rootfolder
     
-    saveplotsfolder = r'C:\Users\fyz11\Documents\Work\Projects\Lu-Organoids\Paper\Suppl_GitHub_Code\test_cell-tracking-challenge_results'
+    saveplotsfolder = r'../test_cell-tracking-challenge_results'
     # saveplotsfolder = r'C:\Users\s205272\Documents\Work\Research\Lu_Lab\SAM_paper_2023\Other_Manuscripts\Cell_Tracking_Challenge_Results_PCA-init'
     fio.mkdir(saveplotsfolder)
     
@@ -75,8 +75,8 @@ if __name__=="__main__":
     #                                       '2023-10-04_U373_modules_github_test')
     # mkdir(saveplotsfolder_cells)
     
-    cellfolders = [r'PhC-C2DH-U373\01', 
-                   r'PhC-C2DH-U373\02']
+    cellfolders = [r'PhC-C2DH-U373/01', 
+                   r'PhC-C2DH-U373/02']
     # cellfolders = [r'Fluo-N2DH-SIM+\01', #, # done  ---- done 
                     # r'Fluo-N2DH-SIM+\02'] #done 
 
@@ -342,8 +342,8 @@ if __name__=="__main__":
     #    ax.set_xlim([-10,10])
         plt.axis('off')
         plt.grid('off')
-        # plt.savefig(os.path.join(saveplotsfolder_cells, 
-                                  # 'umap_area.svg'), dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join(saveplotsfolder_cells, 
+                                  'umap_area.svg'), dpi=300, bbox_inches='tight')
         plt.show()
     
     if len(ecc_ind)>0:
@@ -355,8 +355,8 @@ if __name__=="__main__":
     #    ax.set_xlim([-10,10])
         plt.axis('off')
         plt.grid('off')
-        # plt.savefig(os.path.join(saveplotsfolder_cells, 
-                              # 'umap_eccentricity.svg'), dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join(saveplotsfolder_cells, 
+                              'umap_eccentricity.svg'), dpi=300, bbox_inches='tight')
         plt.show()
     
     if len(flow_ind)>0:
@@ -368,8 +368,8 @@ if __name__=="__main__":
     #    ax.set_xlim([-10,10])
         plt.axis('off')
         plt.grid('off')
-        # plt.savefig(os.path.join(saveplotsfolder_cells, 
-                          # 'umap_mean_speed_flow.svg'), dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join(saveplotsfolder_cells, 
+                          'umap_mean_speed_flow.svg'), dpi=300, bbox_inches='tight')
         plt.show()
     
     if len(intensity_ind)>0:
@@ -381,8 +381,8 @@ if __name__=="__main__":
     #    ax.set_xlim([-10,10])
         plt.axis('off')
         plt.grid('off')
-        # plt.savefig(os.path.join(saveplotsfolder_cells, 
-                          # 'umap_mean_intensity.svg'), dpi=300, bbox_inches='tight')    
+        plt.savefig(os.path.join(saveplotsfolder_cells, 
+                          'umap_mean_intensity.svg'), dpi=300, bbox_inches='tight')    
         plt.show()
             
 # =============================================================================
@@ -398,8 +398,8 @@ if __name__=="__main__":
     #    ax.set_xlim([-10,10])
         plt.axis('off')
         plt.grid('off')
-        # plt.savefig(os.path.join(saveplotsfolder_cells, 
-                          # 'umap_module-%s.svg' %(str(mod_ii).zfill(3))), dpi=300, bbox_inches='tight')    
+        plt.savefig(os.path.join(saveplotsfolder_cells, 
+                          'umap_module-%s.svg' %(str(mod_ii).zfill(3))), dpi=300, bbox_inches='tight')    
         plt.show()
     
     
@@ -418,8 +418,8 @@ if __name__=="__main__":
 #    ax.set_xlim([-10,10])
     plt.axis('off')
     plt.grid('off')
-    # plt.savefig(os.path.join(saveplotsfolder_cells, 
-                      # 'umap_divisions.svg' ), dpi=300, bbox_inches='tight')    
+    plt.savefig(os.path.join(saveplotsfolder_cells, 
+                      'umap_divisions.svg' ), dpi=300, bbox_inches='tight')    
     plt.show()
     
     
@@ -458,8 +458,8 @@ if __name__=="__main__":
         
     plt.axis('off')
     plt.grid('off')
-    # plt.savefig(os.path.join(saveplotsfolder_cells, 
-                              # 'SAM_umap_kmeans_clusters.pdf'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(saveplotsfolder_cells, 
+                              'SAM_umap_kmeans_clusters.pdf'), dpi=300, bbox_inches='tight')
     
     # plt.savefig('Comb_umap_2021-07-06_Brittany_batch_correct_powt_kernelECT_8clusters.png', dpi=300, bbox_inches='tight')
     plt.show()
@@ -517,7 +517,7 @@ if __name__=="__main__":
                                         vmax=6,
                                         nticks=5,
                                         save_dpi=300, 
-                                        saveplotsfolder=None)
+                                        saveplotsfolder=saveplotsfolder_cells)
     
     
     """
@@ -536,7 +536,7 @@ if __name__=="__main__":
                                                          time_intervals = np.linspace(0, np.max(metadict['all_object_TP']), 16+1), 
                                                          clust_labels_colors=clust_labels_colors,
                                                          figsize=(7,5),
-                                                         saveplotsfolder=None)
+                                                         saveplotsfolder=saveplotsfolder_cells)
     
     
     """
@@ -565,6 +565,8 @@ if __name__=="__main__":
              'ro', ms=15, mec='k', mew=3)
     plt.grid('off')
     plt.axis('off')
+    plt.savefig(os.path.join(saveplotsfolder_cells, 
+                      'umap_phenotype_trajectory.svg' ), dpi=300, bbox_inches='tight')
     plt.show()
     
     
@@ -615,7 +617,7 @@ if __name__=="__main__":
                                   edgescale=10, 
                                   edgelabelpos=.5, 
                                   figsize=(15,15),
-                                  savefile=None) # savefile should be specified in .svg format to get the same looking arrows. For some reason .pdf doesn't give this. 
+                                  savefile=os.path.join(saveplotsfolder_cells, 'HMM_transition_graph.svg')) # savefile should be specified in .svg format to get the same looking arrows. For some reason .pdf doesn't give this. 
     plt.show()
     
 

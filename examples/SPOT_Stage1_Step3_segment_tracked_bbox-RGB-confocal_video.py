@@ -28,7 +28,7 @@ if __name__=="__main__":
     # load the CNN model. 
     from SPOT.Detection.unets import att_unet 
     
-    imfile = r'../data/organoids/fluorescent_murine_colon/KRAS G12D EYFP 2.wmv'
+    imfile = r'./data/organoids/fluorescent_murine_colon/KRAS_G12D_EYFP_2.wmv'
     basename = os.path.split(imfile)[-1].split('.wmv')[0]
     
     
@@ -46,7 +46,7 @@ if __name__=="__main__":
     """
     pred_size = 64
     # cnnmodelfile = '/home/felix/Documents/PostDoc/Projects/Organoids_Paper/Organoid_Segmentation/Training/organoid-bbox_attn_seg-unet-master-v2_64x64-8feats_v2.h5'
-    cnnmodelfile = '../models/segment_CNN_model/organoid-bbox_attn_seg-unet-master-v2_64x64-8feats_v2.h5'
+    cnnmodelfile = './models/segment_CNN_model/organoid-bbox_attn_seg-unet-master-v2_64x64-8feats_v2.h5'
     
     segment_model = att_unet(img_w=pred_size, 
                                 img_h=pred_size, 
@@ -64,7 +64,7 @@ if __name__=="__main__":
     Load the tracked bounding boxes. 
     """
     
-    bboxfolder = r'C:\Users\fyz11\Documents\Work\Projects\Lu-Organoids\Paper\Suppl_GitHub_Code\test_outputs\test_detection_folder'
+    bboxfolder = r'../test_outputs/test_detection_folder'
     bboxfile = os.path.join(bboxfolder, '%s'%(basename), 'flow_bbox_tracks_Ch-%d.mat' %(desired_ch+1))
     bbox_tracks_obj = spio.loadmat(bboxfile)
     
@@ -101,7 +101,7 @@ if __name__=="__main__":
 
 
     # define the savefolder
-    outputfolder = r'C:\Users\fyz11\Documents\Work\Projects\Lu-Organoids\Paper\Suppl_GitHub_Code\test_outputs\test_segmentation_folder'
+    outputfolder = r'../test_outputs/test_segmentation_folder'
     fio.mkdir(outputfolder)
 
 

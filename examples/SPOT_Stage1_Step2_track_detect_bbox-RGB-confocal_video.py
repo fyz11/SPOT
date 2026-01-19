@@ -23,7 +23,7 @@ if __name__=="__main__":
     import SPOT.Tracking.optical_flow as SPOT_optical_flow
     
     
-    imfile = r'../data/organoids/fluorescent_murine_colon/KRAS G12D EYFP 2.wmv'
+    imfile = r'./data/organoids/fluorescent_murine_colon/KRAS_G12D_EYFP_2.wmv'
     basename = os.path.split(imfile)[-1].split('.wmv')[0]
     
     
@@ -60,7 +60,7 @@ if __name__=="__main__":
     """
     Specify the detected bounding box folder 
     """
-    bboxfolder = r'C:\Users\fyz11\Documents\Work\Projects\Lu-Organoids\Paper\Suppl_GitHub_Code\test_outputs\test_detection_folder'
+    bboxfolder = r'../test_outputs/test_detection_folder'
     
     # also specify the save output folder, here we will save to the same folder. 
     outfolder = bboxfolder

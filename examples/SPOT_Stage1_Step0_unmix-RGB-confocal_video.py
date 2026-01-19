@@ -17,8 +17,14 @@ if __name__=="__main__":
     import SPOT.Image.image as SPOT_image
     import SPOT.Utility_Functions.file_io as fio
     import pylab as plt 
+    import os
     
-    imfile = r'../data/organoids/fluorescent_murine_colon/KRAS G12D EYFP 2.wmv'
+    imfile = r'./data/organoids/fluorescent_murine_colon/KRAS_G12D_EYFP_2.wmv'
+
+    saveplots = True
+    savedir = '../test_outputs/RGB_unmixing'
+    if saveplots:
+        os.makedirs(savedir, exist_ok=True)
     
     vid = fio.read_video_cv2(imfile)
     
@@ -38,6 +44,8 @@ if __name__=="__main__":
     plt.subplot(133)
     plt.title('raw max. proj channel 3')
     plt.imshow(vid[...,2].max(axis=0))
+    if saveplots:
+        plt.savefig(os.path.join(savedir, 'raw_max_projection.png'), dpi=150, bbox_inches='tight')
     plt.show()
     
 
@@ -61,6 +69,7 @@ if __name__=="__main__":
     plt.subplot(133)
     plt.title('unmixed max. proj channel 3')
     plt.imshow(vid_unmixed[...,2].max(axis=0))
-    plt.show()    
-    
-    
+    if saveplots:
+        plt.savefig(os.path.join(savedir, 'unmixed_max_projection.png'), dpi=150, bbox_inches='tight')
+    plt.show()
+

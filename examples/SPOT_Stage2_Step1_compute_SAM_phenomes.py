@@ -28,7 +28,7 @@ if __name__=="__main__":
     
     
 
-    imfile = r'../data/organoids/fluorescent_murine_colon/KRAS G12D EYFP 2.wmv'
+    imfile = r'./data/organoids/fluorescent_murine_colon/KRAS_G12D_EYFP_2.wmv'
     basename = os.path.split(imfile)[-1].split('.wmv')[0]
     
     vid = fio.read_video_cv2(imfile)
@@ -52,7 +52,7 @@ if __name__=="__main__":
     Define an output folder
     """
     # we will just use the same folder as the segmentations 
-    outfolder = r'C:\Users\fyz11\Documents\Work\Projects\Lu-Organoids\Paper\Suppl_GitHub_Code\test_outputs\test_segmentation_folder'
+    outfolder = r'../test_outputs/test_segmentation_folder'
     fio.mkdir(outfolder)
     
     
@@ -60,7 +60,7 @@ if __name__=="__main__":
     Load the postprocessed segmentations
     """
     # this is just to show how to autodetect for multiple channels. 
-    segmentation_folder = r'C:\Users\fyz11\Documents\Work\Projects\Lu-Organoids\Paper\Suppl_GitHub_Code\test_outputs\test_segmentation_folder'
+    segmentation_folder = r'../test_outputs/test_segmentation_folder'
     
     savematfolder = os.path.join(outfolder, basename)
     savematfile = os.path.join(savematfolder, basename+'_boundaries_final_RGB.mat') 

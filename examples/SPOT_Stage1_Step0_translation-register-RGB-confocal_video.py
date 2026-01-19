@@ -12,6 +12,7 @@ if __name__=="__main__":
     We demonstate this here using a phase-correlation method. 
     
     """
+    import os
     import numpy as np 
     import SPOT.Image.image as SPOT_image
     import SPOT.Utility_Functions.file_io as fio
@@ -27,7 +28,12 @@ if __name__=="__main__":
     np.random.seed(1242)
     
     
-    imfile = r'../data/organoids/fluorescent_murine_colon/KRAS G12D EYFP 2.wmv'
+    imfile = r'./data/organoids/fluorescent_murine_colon/KRAS_G12D_EYFP_2.wmv'
+    
+    saveplots = True
+    savedir = '../test_outputs/frame_registration'
+    if saveplots:
+        os.makedirs(savedir, exist_ok=True)
     
     vid = fio.read_video_cv2(imfile)
     
@@ -69,6 +75,8 @@ if __name__=="__main__":
         plt.figure(figsize=(10,10))
         plt.title('Frame: ' + str(frame_no).zfill(5) + '_jittered')
         plt.imshow(vid_gray_jitter[frame_no], cmap='gray')
+        if saveplots:
+            plt.savefig(os.path.join(savedir, f'frame_{str(frame_no).zfill(5)}_jittered.png'))
         plt.show()
         
     
@@ -95,6 +103,8 @@ if __name__=="__main__":
         plt.figure(figsize=(10,10))
         plt.title('Frame: ' + str(frame_no).zfill(5) + '_registered')
         plt.imshow(stacked_video_translation[frame_no], cmap='gray')
+        if saveplots:
+            plt.savefig(os.path.join(savedir, f'frame_{str(frame_no).zfill(5)}_registered.png'))
         plt.show()
     
 

@@ -1,2 +1,2 @@
 Filename,Img_Channel,Genetics,Patients,Conditions,pixel_resolution[um],time_resolution[h],n_frames
-KRAS G12D EYFP 2,3,KRAS_G12D,,,2.76,2,36
+KRAS_G12D_EYFP_2,3,KRAS_G12D,,,2.76,2,36

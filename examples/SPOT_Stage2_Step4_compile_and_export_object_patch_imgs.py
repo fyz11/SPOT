@@ -27,7 +27,7 @@ if __name__=="__main__":
     """
     Specify the top level folder of the video dataset
     """
-    masterimgfolder = r'../data/organoids/fluorescent_murine_colon'
+    masterimgfolder = r'./data/organoids/fluorescent_murine_colon'
     
     # specify whether we should inverse the channel order, in case the metrics were extracted for the inverse ordering i.e. BGR instead of RGB 
     rev_channels = False
@@ -54,13 +54,13 @@ if __name__=="__main__":
     """
     specify the top level save location of the final features for each video
     """
-    mastersavefolder = r'C:\Users\fyz11\Documents\Work\Projects\Lu-Organoids\Paper\Suppl_GitHub_Code\test_outputs\test_segmentation_folder'
+    mastersavefolder = r'../test_outputs/test_segmentation_folder'
     
     
     """
     specify where we want to save the final compiled SAM phenomes over all the movies which will be used for analysis
     """
-    final_compiled_savefolder = r'C:\Users\fyz11\Documents\Work\Projects\Lu-Organoids\Paper\Suppl_GitHub_Code\test_outputs'
+    final_compiled_savefolder = r'../test_outputs'
     fio.mkdir(final_compiled_savefolder) # create if doesn't exist. 
     
 

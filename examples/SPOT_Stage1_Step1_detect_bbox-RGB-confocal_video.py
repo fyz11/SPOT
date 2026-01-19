@@ -18,7 +18,7 @@ if __name__=="__main__":
     import SPOT.Utility_Functions.file_io as fio
     import SPOT.Detection.detection as detection 
     
-    imfile = r'../data/organoids/fluorescent_murine_colon/KRAS G12D EYFP 2.wmv'
+    imfile = r'./data/organoids/fluorescent_murine_colon/KRAS_G12D_EYFP_2.wmv'
     basename = os.path.split(imfile)[-1].split('.wmv')[0]
     
     vid = fio.read_video_cv2(imfile)
@@ -26,7 +26,7 @@ if __name__=="__main__":
     """
     Specify the trained detection model - YOLOv3
     """
-    outfolder = r'C:\Users\fyz11\Documents\Work\Projects\Lu-Organoids\Paper\Suppl_GitHub_Code\test_outputs\test_detection_folder'
+    outfolder = r'../test_outputs/test_detection_folder'
     outfolder = os.path.join(outfolder, basename)
     fio.mkdir(outfolder)
 
@@ -34,7 +34,7 @@ if __name__=="__main__":
     Specify the CNN detector weights location here. Our pretrained is available and can be downloaded from dropbox. Follow the link in the README.md to download then copy to models/detect_CNN_model/
     """
     # you should download this weights file and place it here. 
-    weightsfile = r'../models/detect_CNN_model/keras_YOLOv3_organoid_detector2.h5'
+    weightsfile = r'./models/detect_CNN_model/keras_YOLOv3_organoid_detector2.h5'
 
     
     """
