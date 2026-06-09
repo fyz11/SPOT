@@ -21,6 +21,17 @@
 
 <!-- TOC end -->
 
+[![PyPI version](https://badge.fury.io/py/SAM-SPOT.svg)](https://badge.fury.io/py/SAM-SPOT)
+[![Downloads](https://pepy.tech/badge/SAM-SPOT)](https://pepy.tech/project/SAM-SPOT)
+[![Downloads](https://pepy.tech/badge/SAM-SPOT/month)](https://pepy.tech/project/SAM-SPOT)
+[![Python version](https://img.shields.io/pypi/pyversions/SAM-SPOT)](https://pypistats.org/packages/SAM-SPOT)
+[![GitHub stars](https://img.shields.io/github/stars/fyz11/SPOT?style=social)](https://github.com/fyz11/SPOT/)
+[![GitHub forks](https://img.shields.io/github/forks/fyz11/SPOT?style=social)](https://github.com/fyz11/SPOT/)
+
+#### June 2026
+- SPOT is available in PyPI (https://pypi.org/project/SAM-SPOT/0.1.1/)
+- Install using `pip install SAM-SPOT`. Requires Python 3.9 or 3.10
+
 #### Jan 2026
 - Tutorial video for installing SPOT, [link](https://www.dropbox.com/scl/fi/yyebz7clz4m46791zigj6/SPOT-tutorial.mp4?rlkey=aio3zsr33l4szh8gk4290ku1a&e=1&st=sw9ist2l&dl=0)
 - added optional dependency to install `pacmap`. Requires externally installing from conda-forge the `python-annoy` package. 
