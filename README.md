@@ -168,6 +168,10 @@ You can also install directly from the github without cloning, but will still ne
 ```shell
 pip install SPOT@git+https://github.com/fyz11/SPOT.git
 ```
+You can also install directly from PyPI without cloning, but will still need to manually download the pretrained model weights, if using the neural nets:
+```shell
+pip install SAM-SPOT
+```
 
 <!-- TOC --><a name="copyright-information"></a>
 ### COPYRIGHT INFORMATION:
