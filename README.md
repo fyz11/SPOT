@@ -9,9 +9,9 @@
    * [Introduction to SPOT](#introduction-to-spot)
    * [Introduction to the SAM phenome](#introduction-to-the-sam-phenome)
         + [Code snippet to compute phenome](#code-snippet-to-compute-phenome)
-   * [Associated Paper](#associated-paper)
+   * [Associated Papers](#associated-papers)
+   * [Associated Datasets](#associated-datasets)
    * [Getting Started](#getting-started)
-   * [SPOTapp](#spotapp)
    * [Pretrained Neural Network Models for organoid detection and segmentation](#pretrained-neural-network-models-for-organoid-detection-and-segmentation)
    * [Documentation](#documentation)
    * [To install](#to-install)
@@ -46,7 +46,7 @@ Three innovations drive SPOT for temporal image analysis:
 2. a standardized temporal analysis of compiled SAM phenomes - minimal assumption, push-and-go
 3. automated and standardized techniques to cluster related SAM features into SAM modules for interpreting discovered phenotypes
 
-SPOT is provided here as a Python package to allow full flexibility. To get started, please check out exemplar scripts in the examples/ folder. We also include SPOTapp, a graphical user interface (GUI) to run SPOT stages 1 and 2. This app is currently in alpha development and is provided here as-is to support the paper publication. 
+SPOT is provided here as a Python package to allow full flexibility. To get started, please check out exemplar scripts in the examples/ folder.
 
 <p align="center">
   <img src="https://github.com/fyz11/SPOT/blob/main/docs/pictures/SAM_motivation2.jpg" width=100%/>
@@ -97,7 +97,7 @@ metrics, metrics_labels, metrics_norm_bool = SPOT_SAM_features.compute_boundary_
                                                                                                 boundaries)
 ```
 
-<!-- TOC --><a name="associated-paper"></a>
+<!-- TOC --><a name="associated-papers"></a>
 ## Associated Papers
 SPOT is associated with the following papers (which are currently under journal revision), which you will be able to read after publication for more technical detail and get an idea of the many applications SPOT enables: 
 
@@ -106,8 +106,8 @@ SPOT is associated with the following papers (which are currently under journal 
 2. (3D Organoid Timelapse Application) **Identifying phenotype-genotype-function coupling in 3D organoid imaging using 
 Shape, Appearance and Motion Phenotype Observation Tool (SPOT)**, 2025, written by Felix Y. Zhou, Brittany-Amber Jacobs, Adam Norton-Steele, Xiaoyue Han, Thomas M. Carroll, Carlos Ruiz Puig, Joseph Chadwick, Xiao Qin, Richard Lisle, Lewis Marsh, Helen M. Byrne, Heather A. Harrington, Linna Zhou and Xin Lu.
 
-<!-- TOC --><a name="Associated datasets"></a>
-## Associated datasets
+<!-- TOC --><a name="associated-datasets"></a>
+## Associated Datasets
 The [Synthetic Ground Truth Organoid (SGTO) datasets](https://zenodo.org/records/14265519) are used to validate SPOT sensitivity, robustness, and Z-plane effects in the associated 3D Organoid Timelapse Application paper (see above).
 
 <!-- TOC --><a name="getting-started"></a>
