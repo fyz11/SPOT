@@ -98,13 +98,17 @@ metrics, metrics_labels, metrics_norm_bool = SPOT_SAM_features.compute_boundary_
 ```
 
 <!-- TOC --><a name="associated-paper"></a>
-## Associated Paper
+## Associated Papers
 SPOT is associated with the following papers (which are currently under journal revision), which you will be able to read after publication for more technical detail and get an idea of the many applications SPOT enables: 
 
 1. (Methods paper, 2D fixed and live-cell imaging application) **Development of a universal imaging “phenome” using Shape, Appearance and Motion (SAM) features and the SAM Observation Tool (SPOT)**, (2025), written by Felix Y. Zhou, Adam Norton-Steele, Lewis Marsh, Helen M. Byrne, Heather A. Harrington and Xin Lu.
 
 2. (3D Organoid Timelapse Application) **Identifying phenotype-genotype-function coupling in 3D organoid imaging using 
-2 Shape, Appearance and Motion Phenotype Observation Tool (SPOT)**, 2025, written by Felix Y. Zhou, Brittany-Amber Jacobs, Adam Norton-Steele, Xiaoyue Han, Thomas M. Carroll, Carlos Ruiz Puig, Joseph Chadwick, Xiao Qin, Richard Lisle, Lewis Marsh, Helen M. Byrne, Heather A. Harrington, Linna Zhou and Xin Lu.
+Shape, Appearance and Motion Phenotype Observation Tool (SPOT)**, 2025, written by Felix Y. Zhou, Brittany-Amber Jacobs, Adam Norton-Steele, Xiaoyue Han, Thomas M. Carroll, Carlos Ruiz Puig, Joseph Chadwick, Xiao Qin, Richard Lisle, Lewis Marsh, Helen M. Byrne, Heather A. Harrington, Linna Zhou and Xin Lu.
+
+<!-- TOC --><a name="Associated datasets"></a>
+## Associated datasets
+The [Synthetic Ground Truth Organoid (SGTO) datasets](https://zenodo.org/records/14265519) are used to validate SPOT sensitivity, robustness, and Z-plane effects in the associated 3D Organoid Timelapse Application paper (see above).
 
 <!-- TOC --><a name="getting-started"></a>
 ## Getting Started
@@ -137,10 +141,6 @@ Exemplar scripts to run every step of the workflow are provided in the Examples 
 2. SPOT_demo_single-cell-tracking-challenge_Step3_SPOT_analyze_all_SAM_phenomes_cell_tracking_challenge.py
 
 Each example should take around a few mins to run. The longest time is computing the SAM phenome which might take 10s of mins. 
-
-<!-- TOC --><a name="spotapp"></a>
-## SPOTapp
-In parallel to the scripts, we provide an alpha version of a GUI to run SPOT called SPOTapp. You can find download instructions in the file SPOTapp.md. Instructions to use the software can also be found at the download link.
 
 <!-- TOC --><a name="pretrained-neural-network-models-for-organoid-detection-and-segmentation"></a>
 ## Pretrained Neural Network Models for organoid detection and segmentation
