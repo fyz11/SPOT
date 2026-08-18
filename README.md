@@ -28,6 +28,10 @@
 [![GitHub stars](https://img.shields.io/github/stars/fyz11/SPOT?style=social)](https://github.com/fyz11/SPOT/)
 [![GitHub forks](https://img.shields.io/github/forks/fyz11/SPOT?style=social)](https://github.com/fyz11/SPOT/)
 
+#### Aug 2026
+- Both SPOT methods and application papers published in Nature Communcations!
+- [Methods paper](https://www.nature.com/articles/s41467-026-75505-8) and [Organoids paper](https://www.nature.com/articles/s41467-026-75506-7)
+
 #### June 2026
 - SPOT is available in PyPI (https://pypi.org/project/SAM-SPOT/0.1.1/)
 - Install using `pip install SAM-SPOT`. Requires Python 3.9 or 3.10
@@ -101,10 +105,10 @@ metrics, metrics_labels, metrics_norm_bool = SPOT_SAM_features.compute_boundary_
 ## Associated Papers
 SPOT is associated with the following papers (which are currently under journal revision), which you will be able to read after publication for more technical detail and get an idea of the many applications SPOT enables: 
 
-1. (Methods paper, 2D fixed and live-cell imaging application) **Development of a universal imaging “phenome” using Shape, Appearance and Motion (SAM) features and the SAM Observation Tool (SPOT)**, (2025), written by Felix Y. Zhou, Adam Norton-Steele, Lewis Marsh, Helen M. Byrne, Heather A. Harrington and Xin Lu.
+1. (Methods paper, 2D fixed and live-cell imaging application) **Development of a universal imaging “phenome” using shape, appearance and motion (SAM) features and the SAM Phenotype Observation Tool (SPOT)**, [Nat. Comms, 2026](https://www.nature.com/articles/s41467-026-75505-8), written by Felix Y. Zhou, Adam Norton-Steele, Lewis Marsh, Helen M. Byrne, Heather A. Harrington and Xin Lu.
 
 2. (3D Organoid Timelapse Application) **Identifying phenotype-genotype-function coupling in 3D organoid imaging using 
-Shape, Appearance and Motion Phenotype Observation Tool (SPOT)**, 2025, written by Felix Y. Zhou, Brittany-Amber Jacobs, Adam Norton-Steele, Xiaoyue Han, Thomas M. Carroll, Carlos Ruiz Puig, Joseph Chadwick, Xiao Qin, Richard Lisle, Lewis Marsh, Helen M. Byrne, Heather A. Harrington, Linna Zhou and Xin Lu.
+Shape, Appearance and Motion Phenotype Observation Tool (SPOT)**, [Nat. Comms., 2026](https://www.nature.com/articles/s41467-026-75506-7), written by Felix Y. Zhou, Brittany-Amber Jacobs, Adam Norton-Steele, Xiaoyue Han, Thomas M. Carroll, Carlos Ruiz Puig, Joseph Chadwick, Xiao Qin, Richard Lisle, Lewis Marsh, Helen M. Byrne, Heather A. Harrington, Linna Zhou and Xin Lu.
 
 <!-- TOC --><a name="associated-datasets"></a>
 ## Associated Datasets
