@@ -152,9 +152,10 @@ def test_regress_out_confounders_covariate_features(data):
     X = np.c_[d['X'], d['size'], d['intensity']]
     names = np.r_[d['names'], ['equivalent_diameter', 'mean_intensity']]
     cov = ['equivalent_diameter', 'mean_intensity']
-    out, model = pp.regress_out_confounders(X, categorical={'batch': d['batch']}, feature_names=names,
-                                            covariate_features=cov, return_model=True)
-    assert out.shape == X.shape
+    out, names_out, model = pp.regress_out_confounders(X, categorical={'batch': d['batch']}, feature_names=names,
+                                                       covariate_features=cov, return_model=True)
+    assert out.shape == X.shape and list(names_out) == list(names)
+    assert model.keep_.all() and len(model.dropped_features_) == 0
     np.testing.assert_array_equal(out[:, -2:], X[:, -2:])
     ref = pp.ConfoundRegressor().fit_transform(d['X'], continuous={'equivalent_diameter': d['size'],
                                                                    'mean_intensity': d['intensity']},
@@ -190,3 +191,36 @@ def test_confound_association(data):
     Y = np.c_[lv * 1., rng.normal(size=600)]
     eta = pp.confound_association(Y, ['a', 'b'], categorical=lv)['association'].values
     assert eta[0] == pytest.approx(1.) and eta[1] < 0.02
+
+
+def test_drop_features_still_associated():
+    """ an indicator feature switched on for 2 of 20 discrete object sizes keeps some association with size after the
+    spline correction (|rho| ~0.1): dropped when above max_abs_rho, kept below """
+    rng = np.random.default_rng(0)
+    n = 2000
+    levels = np.sort(rng.uniform(20, 60, 20))
+    sil = rng.integers(0, 20, n)
+    size = levels[sil]
+    indicator = np.isin(sil, [18, 19]).astype(float) + 0.01 * rng.normal(size=n)
+    X = np.c_[rng.normal(size=(n, 3)), indicator, size]
+    names = np.array(['f0', 'f1', 'f2', 'indicator', 'equivalent_diameter'])
+    kw = dict(feature_names=names, covariate_features=['equivalent_diameter'])
+    out, names_out, model = pp.regress_out_confounders(X, max_abs_rho=0.05, return_model=True, **kw)
+    assert list(model.dropped_features_) == ['indicator']
+    assert list(names_out) == ['f0', 'f1', 'f2', 'equivalent_diameter'] and out.shape == (n, 4)
+    np.testing.assert_array_equal(model.keep_, np.isin(names, names_out))
+    np.testing.assert_array_equal(out[:, -1], size)  # the covariate feature is kept unchanged
+    _, names_default = pp.regress_out_confounders(X, **kw)  # default max_abs_rho=0.3
+    assert 'indicator' in names_default
+    _, names_off = pp.regress_out_confounders(X, max_abs_rho=0.05, drop_associated=False, **kw)
+    assert list(names_off) == list(names)
+
+
+def test_drop_uses_reference_rows():
+    """ treated objects are larger and differ in features 0-3: with reference=controls those features are kept """
+    d = make_data(n=3000, size_shift=1.5, seed=1)
+    ctrl = d['cond'] == 0
+    cont = {'size': d['size'], 'intensity': d['intensity']}
+    _, names_ref = pp.regress_out_confounders(d['X'], continuous=cont, categorical={'batch': d['batch']},
+                                              feature_names=d['names'], reference=ctrl, max_abs_rho=0.2)
+    assert list(names_ref) == list(d['names'])

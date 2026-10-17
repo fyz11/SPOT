@@ -301,7 +301,7 @@ if __name__=="__main__":
     # Optionally regress out confounding effects (e.g. size, intensity, batch) before embedding.
     regress_confounders = False
     if regress_confounders:
-        all_feats = preprocess.regress_out_confounders(all_feats.astype(np.float64), 
+        all_feats, feature_names = preprocess.regress_out_confounders(all_feats.astype(np.float64), 
                                                        feature_names=feature_names, 
                                                        covariate_features=['equivalent_diameter', 'mean_intensity'], # covariates taken from the features
                                                        categorical=None) # e.g. {'batch': batch_ids}

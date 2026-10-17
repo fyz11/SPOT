@@ -853,11 +853,13 @@ class ConfoundRegressor(object):
 
 
 def regress_out_confounders(X, continuous=None, categorical=None, feature_names=None, covariate_features=None,
-                            keep_covariate_features=True, reference=None, return_model=False, **regressor_kwargs):
+                            keep_covariate_features=True, reference=None, drop_associated=True, max_abs_rho=0.3,
+                            max_eta2=0.1, return_model=False, **regressor_kwargs):
     r""" Regress confounding effects (object size, intensity, batch / plate) out of normalised features with a
     ConfoundRegressor (rank -> cubic spline for continuous covariates, mean (and optionally scale) shift per level for
-    categorical covariates, optionally estimated on reference rows only). Generalises regressing the features on a
-    cubic spline of the rank of a single covariate.
+    categorical covariates, optionally estimated on reference rows only), then drop the features that remain strongly
+    associated with a confound (e.g. features that depend on size in a way a smooth curve cannot remove, such as
+    indicator-like features). Generalises regressing the features on a cubic spline of the rank of a single covariate.
 
     Meant to be applied after the per-feature normalisation (StandardScaler + power transform) and before
     SPOT.Analysis.preprocessing.weight_sam_features / UMAP.
@@ -871,7 +873,7 @@ def regress_out_confounders(X, continuous=None, categorical=None, feature_names=
     categorical : None, array, dict or pandas DataFrame
         categorical covariates, e.g. {'batch': batch_id}
     feature_names : None or (n_feats,) array of str
-        names of the columns of X, required with covariate_features
+        names of the columns of X, required with covariate_features. If None, the column indices are used.
     covariate_features : None or list of str
         names of columns of X used as continuous covariates, e.g. ['equivalent_diameter', 'mean_intensity']. These
         columns are not residualised (they would become ~0) but returned unchanged, or dropped if
@@ -879,11 +881,19 @@ def regress_out_confounders(X, continuous=None, categorical=None, feature_names=
     keep_covariate_features : bool
         keep the covariate_features columns (unchanged) in the output, else drop them
     reference : None or (n_objects,) bool np.array
-        rows used to estimate the confound effects (e.g. controls), so condition differences are not regressed away
+        rows used to estimate the confound effects (e.g. controls), so condition differences are not regressed away.
+        The remaining association (drop_associated) is then also measured on these rows only, so features that differ
+        between conditions are not dropped because a confound (e.g. size) also differs between conditions.
+    drop_associated : bool
+        drop the corrected features whose remaining association with any confound exceeds max_abs_rho (|Spearman rho|,
+        continuous covariates) or max_eta2 (between-level variance share, categorical covariates)
+    max_abs_rho, max_eta2 : float
+        the thresholds of drop_associated
     return_model : bool
         also return the fitted ConfoundRegressor, to correct new data with model.transform. The model acts on the
         residualised columns only (X[:, ~np.isin(feature_names, covariate_features)]) and takes the covariate_features
-        columns as continuous covariates named by their feature name.
+        columns as continuous covariates named by their feature name. model.keep_ is the boolean mask of the output
+        columns among the input columns of X and model.dropped_features_ the names of the dropped features.
     **regressor_kwargs :
         spline, rank, n_knots, batch_scale, restandardize of ConfoundRegressor
 
@@ -891,20 +901,20 @@ def regress_out_confounders(X, continuous=None, categorical=None, feature_names=
     -------
     X_corrected : (n_objects, n_feats_out) np.array
     feature_names_out : (n_feats_out,) np.array
-        only if covariate_features are given and keep_covariate_features=False
+        the names (or column indices) of the output features
     model : ConfoundRegressor
         only if return_model
     """
     import numpy as np
     X = np.asarray(X, dtype=np.float64)
+    names = np.arange(X.shape[1]) if feature_names is None else np.asarray(feature_names).astype(str)
     cont = _covariate_dict(continuous, len(X), 'continuous')
     is_cov = np.zeros(X.shape[1], dtype=bool)
     if covariate_features:
         if feature_names is None:
             raise ValueError('feature_names is required to take covariate_features from the columns of X')
-        feature_names = np.asarray(feature_names).astype(str)
         for name in covariate_features:
-            hits = np.flatnonzero(feature_names == name)
+            hits = np.flatnonzero(names == name)
             if len(hits) == 0:
                 raise ValueError('covariate feature %r is not in feature_names' % name)
             if name in cont:
@@ -915,18 +925,32 @@ def regress_out_confounders(X, continuous=None, categorical=None, feature_names=
     model = ConfoundRegressor(**regressor_kwargs)
     corrected = model.fit_transform(X[:, ~is_cov], continuous=cont or None, categorical=categorical,
                                     reference=reference)
-    if keep_covariate_features:
-        out = X.copy()
-        out[:, ~is_cov] = corrected
-    else:
-        out = corrected
 
-    result = [out]
-    if covariate_features and not keep_covariate_features:
-        result.append(feature_names[~is_cov])
+    # features still associated with a confound after the correction
+    keep_resid = np.ones(corrected.shape[1], dtype=bool)
+    if drop_associated:
+        cat = _covariate_dict(categorical, len(X), 'categorical')
+        rows = np.ones(len(X), dtype=bool) if reference is None else np.asarray(reference, dtype=bool).ravel()
+        assoc = confound_association(corrected[rows], np.arange(corrected.shape[1]),
+                                     continuous={k: np.asarray(v)[rows] for k, v in cont.items()} or None,
+                                     categorical={k: np.asarray(v)[rows] for k, v in cat.items()} or None)
+        too_high = ((assoc['kind'] == 'continuous') & (assoc['association'] > max_abs_rho)) | \
+                   ((assoc['kind'] == 'categorical') & (assoc['association'] > max_eta2))
+        keep_resid[np.unique(assoc.loc[too_high, 'feature'].astype(int))] = False
+
+    keep = np.ones(X.shape[1], dtype=bool)
+    keep[np.flatnonzero(~is_cov)[~keep_resid]] = False
+    if not keep_covariate_features:
+        keep &= ~is_cov
+    out = X.copy()
+    out[:, ~is_cov] = corrected
+    model.keep_ = keep
+    model.dropped_features_ = names[~keep & ~is_cov]
+
+    result = (out[:, keep], names[keep])
     if return_model:
-        result.append(model)
-    return result[0] if len(result) == 1 else tuple(result)
+        result = result + (model,)
+    return result
 
 
 def confound_association(X, feature_names, continuous=None, categorical=None):

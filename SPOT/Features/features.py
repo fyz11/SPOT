@@ -768,7 +768,7 @@ def curvature_splines(x, y, k=4, error=0.1):
 # =============================================================================
 #   Fourier elliptic feats
 # =============================================================================
-def compute_fft_boundary_feats(cont, pixel_xy_res=1.):
+def compute_fft_boundary_feats(cont, pixel_xy_res=1., remove_closing_point=False):
     """ Compute the centroid distance Fourier feature descriptor of a contour
 
     Parameters
@@ -777,6 +777,10 @@ def compute_fft_boundary_feats(cont, pixel_xy_res=1.):
         the xy contour coordinates of the shape 
     pixel_xy_res : float
         the pixel to physical units conversion. for organoids, the pixel to um conversion
+    remove_closing_point : bool
+        if True and the contour is closed (first = last point), drop the repeated last point before the FFT. The
+        magnitudes are then exactly invariant to rotation and to the start point of the contour; with the repeated point
+        they change when the contour starts at a different point (e.g. after reorient_contour of a rotated object).
 
     Returns
     -------
@@ -796,6 +800,8 @@ def compute_fft_boundary_feats(cont, pixel_xy_res=1.):
         #     # idea is not to give scale invariance.
             # ccc = ccc / (float(scale) + 1.) # this is proportional to the image size..... but this is not an absolute scale..... -> should use a global scaling....
         ccc  = ccc * pixel_xy_res # translate to physical units.
+        if remove_closing_point and len(ccc) > 1 and np.allclose(ccc[0], ccc[-1]):
+            ccc = ccc[:-1] # each point once: a periodic sequence, so |FFT| is invariant to the start point
         ccc_xy = ccc[...,0] + 1j*ccc[...,1]
         ccc_xy = np.fft.fft(ccc_xy)
 
@@ -820,7 +826,8 @@ def compute_boundary_morphology_features(boundaries, imshape,
                                          norm_scm=True,
                                          n_ref_pts_scm=5,
                                          pixel_xy_res=1.,
-                                         timesample=None):
+                                         timesample=None,
+                                         fourier_remove_closing_point=False):
     """ Master function for extracting all shape-based features described in the SAM paper.
     
     Parameters
@@ -855,6 +862,10 @@ def compute_boundary_morphology_features(boundaries, imshape,
         the pixel to physical units conversion. for organoids, the pixel to um conversion
     timesample : None or int
         if specified, compute the feature every timesample # of frames. This can be done when in successive frames, the variation does not vary a lot and one wishes to speed up computation or save on memory
+    fourier_remove_closing_point : bool
+        if True, the Fourier features drop the repeated closing point of the contour, which makes them exactly invariant
+        to rotation and to the contour start point (there is then one Fourier feature less). False (default) keeps the
+        original features.
     
 
     Returns 
@@ -1020,7 +1031,8 @@ def compute_boundary_morphology_features(boundaries, imshape,
                 if all_feats_compute==True or (all_feats_compute==False and fourier_features==True):
 
             #        cnt_fourier = compute_elliptic_feats([cnt], vid[0].shape, normalize=True).ravel()
-                    cnt_fourier = compute_fft_boundary_feats([boundary_ii_tt], pixel_xy_res=pixel_xy_res).ravel()
+                    cnt_fourier = compute_fft_boundary_feats([boundary_ii_tt], pixel_xy_res=pixel_xy_res,
+                                                             remove_closing_point=fourier_remove_closing_point).ravel()
             #        cnt_fourier = cnt_fourier[1:len(cnt)//2]
                     cnt_fourier = np.abs(cnt_fourier[1:len(cnt_fourier)//2]) # 1st is typically a DC offset, keep only magnitude information!.
                     cnt_fourier = np.abs(cnt_fourier)**(0.2) #* np.sign(cnt_fourier) # power normalisation? of the fourier features
@@ -2796,7 +2808,8 @@ def _morphology_features_sample_fast(boundary_ii_tt, imshape, opts, pre=None):
         all_feats_norm_bool.append(np.hstack([True]*len(cnt_binary_feats_norm_labels)))
 
     if all_feats_compute==True or (all_feats_compute==False and opts['fourier_features']==True):
-        cnt_fourier = compute_fft_boundary_feats([boundary_ii_tt], pixel_xy_res=pixel_xy_res).ravel()
+        cnt_fourier = compute_fft_boundary_feats([boundary_ii_tt], pixel_xy_res=pixel_xy_res,
+                                                 remove_closing_point=opts.get('fourier_remove_closing_point', False)).ravel()
         cnt_fourier = np.abs(cnt_fourier[1:len(cnt_fourier)//2])
         cnt_fourier = np.abs(cnt_fourier)**(0.2)
         cnt_fourier = cnt_fourier / (np.linalg.norm(cnt_fourier) + 1e-8)
@@ -2855,7 +2868,8 @@ def compute_boundary_morphology_features_fast(boundaries, imshape,
                                               n_ref_pts_scm=5,
                                               pixel_xy_res=1.,
                                               timesample=None,
-                                              n_jobs=1):
+                                              n_jobs=1,
+                                              fourier_remove_closing_point=False):
     """ Fast variant of compute_boundary_morphology_features with the same parameters and outputs.
 
     The contour reorientation rasterises the shape in its bounding box instead of a full image canvas, the Euler characteristic transform builds its cubical complex with array operations and the shape context histograms use np.bincount. Objects can be processed in parallel.
@@ -2868,6 +2882,10 @@ def compute_boundary_morphology_features_fast(boundaries, imshape,
         the worker processes limit the BLAS threads, so BLAS-based statistics (the Haralick features) can differ in floating point round-off (~1e-15 relative), as the original function does under different BLAS thread settings,
         and last-bit differences of the vectorised log / arctan2 can rarely move a contour point across a shape context histogram bin edge.
         boundaries are used in C order; the original function's output can differ in rare tie-breaking cases (pixel-grid contours) when given a non C-contiguous array (e.g. from scipy.io.loadmat).
+    fourier_remove_closing_point : bool
+        if True, the Fourier features drop the repeated closing point of the contour, which makes them exactly invariant
+        to rotation and to the contour start point (there is then one Fourier feature less). False (default) keeps the
+        original features.
 
     Returns
     -------
@@ -2890,7 +2908,7 @@ def compute_boundary_morphology_features_fast(boundaries, imshape,
                 curve_err=curve_err, geom_features=geom_features, morph_features=morph_features,
                 fourier_features=fourier_features, ect_features=ect_features,
                 shape_context_features=shape_context_features, norm_scm=norm_scm, n_ref_pts_scm=n_ref_pts_scm,
-                pixel_xy_res=pixel_xy_res)
+                pixel_xy_res=pixel_xy_res, fourier_remove_closing_point=fourier_remove_closing_point)
     per_obj = _run_fast_feature_chunks(_morphology_features_chunk_fast, len(boundaries), n_jobs,
                                        (boundaries, imshape, frames, opts))
     return _assemble_fast_features(per_obj, len(boundaries), len(frames))

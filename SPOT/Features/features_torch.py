@@ -602,7 +602,8 @@ def compute_boundary_morphology_features_torch(boundaries, imshape,
                                                n_ref_pts_scm=5,
                                                pixel_xy_res=1.,
                                                timesample=None,
-                                               device=None):
+                                               device=None,
+                                               fourier_remove_closing_point=False):
     """ PyTorch variant of SPOT.Features.features.compute_boundary_morphology_features with the same parameters and outputs.
 
     The contour rasterisations (for the reorientation and the binary shape) and the Euler characteristic transform are
@@ -615,6 +616,10 @@ def compute_boundary_morphology_features_torch(boundaries, imshape,
     (see compute_boundary_morphology_features)
     device : None or str or torch.device
         the torch device. None uses cuda if available, else the CPU.
+    fourier_remove_closing_point : bool
+        if True, the Fourier features drop the repeated closing point of the contour, which makes them exactly invariant
+        to rotation and to the contour start point (there is then one Fourier feature less). False (default) keeps the
+        original features.
 
     Returns
     -------
@@ -635,7 +640,7 @@ def compute_boundary_morphology_features_torch(boundaries, imshape,
                 curve_err=curve_err, geom_features=geom_features, morph_features=morph_features,
                 fourier_features=fourier_features, ect_features=ect_features,
                 shape_context_features=shape_context_features, norm_scm=norm_scm, n_ref_pts_scm=n_ref_pts_scm,
-                pixel_xy_res=pixel_xy_res)
+                pixel_xy_res=pixel_xy_res, fourier_remove_closing_point=fourier_remove_closing_point)
     samples = _valid_samples(boundaries, frames)
     contours = [boundaries[b][tt] for b, jj, tt in samples]
 

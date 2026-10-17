@@ -93,3 +93,26 @@ def test_motion_recomputes_flow_per_angle(data, monkeypatch):
     # the centroid speed comes from the contours only: identical at the exact quarter turn
     i = list(labels).index('mean_speed_global')
     np.testing.assert_allclose(per_angle[1, ..., i], per_angle[0, ..., i], rtol=0, atol=1e-10, equal_nan=True)
+
+
+def test_fourier_remove_closing_point_is_rotation_invariant(data):
+    """ without the repeated closing point the Fourier magnitudes do not depend on the rotation / contour start point.
+    Real (U373) contours: the ideal synthetic shapes have Fourier coefficients that are exactly 0, whose round-off is
+    amplified by the |.|**0.2 power normalisation of the features. """
+    real = fixtures.load('u373')
+    kw = dict(feature_fn=sf.compute_boundary_morphology_features_fast, boundaries=real['boundaries'][:, :4],
+              imshape=real['imshape'], angles=[0, 30, 90], return_per_angle=True, verbose=False)
+    sens = {}
+    for remove in (False, True):
+        _, labels, _, (per_angle, _) = run_quiet(ag.compute_rotation_averaged_features,
+                                                 fourier_remove_closing_point=remove, **kw)
+        s = ag.rotation_sensitivity(per_angle, labels)
+        sens[remove] = s[s.group == 'Fourier'].sensitivity.max()
+    assert sens[True] < 1e-8 < 0.01 < sens[False]
+    # the same option in the original and torch variants
+    f0, l0, _ = run_quiet(sf.compute_boundary_morphology_features, boundaries=data['boundaries'], imshape=data['imshape'],
+                          fourier_remove_closing_point=True)
+    f1, l1, _ = run_quiet(sf.compute_boundary_morphology_features_fast, boundaries=data['boundaries'],
+                          imshape=data['imshape'], fourier_remove_closing_point=True)
+    assert list(l0) == list(l1) and sum(str(n).startswith('Fourier') for n in l0) == 98
+    np.testing.assert_array_equal(f0, f1)

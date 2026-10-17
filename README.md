@@ -135,10 +135,11 @@ metrics, metrics_labels, metrics_norm_bool = SPOT_augment.compute_rotation_avera
 ```
 import SPOT.Analysis.preprocessing as preprocess
 
-all_feats_corrected = preprocess.regress_out_confounders(all_feats, feature_names=feature_names,
+all_feats_corrected, feature_names_corrected = preprocess.regress_out_confounders(all_feats, feature_names=feature_names,
                                                          covariate_features=['equivalent_diameter', 'mean_intensity'],
                                                          categorical={'batch': batch_ids})
 ```
+Features that remain strongly associated with a confound after the correction (|Spearman rho| > 0.3 or batch eta^2 > 0.1, e.g. step-like dependences a smooth curve cannot remove) are dropped (`drop_associated=True`, thresholds `max_abs_rho`, `max_eta2`).
 Only regress out effects that are truly undesired: on MPEG-7 x Brodatz, regressing out size also removes much of what separates the shapes.
 
 #### Masked appearance and motion features
