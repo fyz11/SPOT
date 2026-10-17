@@ -266,7 +266,9 @@ if __name__=="__main__":
                                                                                                                        niter_smooth=10,
                                                                                                                        min_peak_distance=5,
                                                                                                                        debugviz=False,
-                                                                                                                       savefile=None) # if savefile is set, and debugviz = True, this will save the intermediate plots to the specified folder path.
+                                                                                                                       savefile=None, # if savefile is set, and debugviz = True, this will save the intermediate plots to the specified folder path.
+                                                                                                                       module_selection='multiscale', # 'legacy' = the original rule (lam_smooth, p_smooth, niter_smooth, min_peak_distance only apply to it)
+                                                                                                                       scale='best') # or 'coarse' / 'fine' / an int number of modules; return_scales=True also returns the table of candidate scales
     
     # =============================================================================
     #     Obtain the characteristic signature for each module 

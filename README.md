@@ -34,6 +34,7 @@
 - **New default:** the appearance and motion features are masked (`use_mask=True`): they describe only the object interior and do not leak shape. Use `use_mask=False` for the original SAM features.
 - Recommended for analysis: equal weighting of the SAM feature sets and feature families for embeddings and clustering: `SPOT.Analysis.preprocessing.weight_sam_features(feats, names, group_weighting=True, set_weighting=True)` gives shape, appearance and motion the same total variance and, within each, every feature family (e.g. curvature vs shape context, Haralick vs SIFT, speed vs curl SIFT) the same weight.
 - Optional, depending on the experimental design: regressing out confounders such as size, intensity or batch (`regress_out_confounders`), and rotation-averaged features (`SPOT.Features.augment`).
+- **New default:** multi-scale selection of the number of SAM modules (`hierarchical_cluster_features_into_SAM_modules(..., module_selection='multiscale')`). See [SAM module selection](#sam-module-selection).
 
 #### Aug 2026
 - Both SPOT methods and application papers published in Nature Communcations!
@@ -147,6 +148,23 @@ Only regress out effects that are truly undesired: on MPEG-7 x Brodatz, regressi
 By default (`use_mask=True`) the Haralick and SIFT appearance features and the motion SIFT descriptors only use the pixels inside the object (optionally intersected with foreground segmentation `masks` when the contours are coarse), so appearance and motion do not double count shape. The masked SIFT descriptors are computed on the object patch with its longest side capped at 64 pixels (`masked_sift_resize='cap'`, `siftshape=(64, 64)`), similar to the 64 x 64 patches of the original SIFT features. With `use_mask=False` they are computed on the bounding box crop of the object, as in the original SAM phenome, and also describe its outline. Bug fix: the unmasked motion SIFT descriptors (speed, curl, divergence) set the flow *inside* the object to 0, contrary to their intent, so they described the background flow and the object outline; the flow outside the object is now set to 0.
 
 For embeddings and clustering of the SAM phenome we recommend `weight_sam_features` (after the per-feature normalisation), so that every SAM set and feature family contributes equally.
+
+#### SAM module selection
+`SPOT.Analysis.sam_analysis.hierarchical_cluster_features_into_SAM_modules` groups the features into SAM modules by hierarchical clustering of their correlation profiles. The number of modules is chosen with `module_selection='multiscale'` (default; `select_SAM_module_scales`):
+- **Candidate scales.** These are the numbers of modules whose partition of the dendrogram lives longest compared with a null of independently permuted features. A long lifetime means the modules are internally similar and far apart.
+  - Only modules of at least `min_module_size=3` features are counted.
+  - A candidate must cover at least `min_coverage=0.75` of the features.
+- **Scoring.** Each candidate is scored by a consensus of:
+  - the lifetime;
+  - the silhouette, Davies–Bouldin, Calinski–Harabasz and within-minus-between-module correlation, each relative to the null;
+  - bootstrap stability.
+- **Choosing.**
+  - `scale='best'` (default): the stable candidate with the best consensus.
+  - `'coarse'` / `'fine'`: the stable candidate with the fewest / most modules.
+  - An int: that number of modules.
+- **Diagnostics.** `return_scales=True` also returns the table of candidate scales.
+
+`module_selection='legacy'` reproduces the original rule, the first peak of the smoothed Davies–Bouldin score. Davies–Bouldin is lower-is-better, so that peak is a locally *worst* partition, and on cell tracking challenge data it lies at or next to the global maximum.
 
 <!-- TOC --><a name="associated-papers"></a>
 ## Associated Papers
