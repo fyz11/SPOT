@@ -60,3 +60,40 @@ def test_weight_sam_features(sam_names, group_weighting, set_weighting):
             # the set is scaled as a whole: relative feature variances are kept
             ratio = var[in_set] / var_in[in_set]
             np.testing.assert_allclose(ratio, ratio[0])
+
+
+def test_sets_agree_with_get_SAM_feature_type(sam_names):
+    from SPOT.Analysis.sam_analysis import get_SAM_feature_type
+    names = np.hstack([sam_names['shape'], sam_names['appearance'], sam_names['motion']])
+    sets, _ = pp.sam_feature_groups(names)
+    sam_type, _ = get_SAM_feature_type(names)
+    assert list(sets) == list(np.array(['shape', 'appearance', 'motion'])[sam_type])
+
+
+def test_legacy_export_names_with_feature_sets():
+    """ older exports (data/cell_tracking) name appearance and motion SIFT 'sift_<n>' and have legacy features """
+    import os
+    import pandas as pd
+    meta = {'Filename', 'Img_Channel_No', 'Org_ID', 'Frame_No', 'pixel_resolution[um]', 'Frame_Duration[h]',
+            'Total_Video_Frame_No', 'div_bool'}
+    base = os.path.join(fixtures.REPO, 'data', 'cell_tracking', 'PhC-C2DH-U373', '01')
+    names, given = [], []
+    for s in ('shape', 'appearance', 'motion'):
+        cols = [c for c in pd.read_csv(os.path.join(base, 'final_%s_metrics_filter.csv' % s), nrows=1).columns if c not in meta]
+        names += cols; given += [s] * len(cols)
+    sets, groups = pp.sam_feature_groups(names, feature_sets=given)
+    assert list(sets) == given
+    groups_of = lambda s: set(groups[sets == s])
+    assert groups_of('shape') == set(EXPECTED_GROUPS['shape'])
+    assert groups_of('appearance') == set(EXPECTED_GROUPS['appearance']) | {'thresh_adj_stat'}  # legacy feature group
+    assert groups_of('motion') == set(EXPECTED_GROUPS['motion'])
+    W = pp.weight_sam_features(np.random.default_rng(0).standard_normal((50, len(names))), names, feature_sets=given)
+    for s in ('shape', 'appearance', 'motion'):
+        np.testing.assert_allclose(W[:, sets == s].var(0).sum(), 1.)
+
+
+def test_merged_table_suffixes():
+    """ file_io merges the appearance / motion tables with suffixes for duplicate (legacy 'sift_<n>') names """
+    sets, groups = pp.sam_feature_groups(['sift_1_appear', 'sift_1_motion', 'sift_motion_1', 'thresh_adj_stat_1_appear'])
+    assert list(sets) == ['appearance', 'motion', 'motion', 'appearance']
+    assert list(groups) == ['SIFT', 'speed SIFT', 'speed SIFT', 'thresh_adj_stat']

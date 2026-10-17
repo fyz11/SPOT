@@ -446,7 +446,21 @@ SAM_FEATURE_GROUPS = [
 ]
 
 
-def sam_feature_groups(feature_names):
+# names of older SPOT exports, resolved within a known SAM set (see sam_feature_groups(feature_sets=...))
+_LEGACY_GROUPS = {
+    'appearance': [('SIFT', lambda n: n.startswith('sift_'))],
+    'motion': [('global motion', lambda n: n.startswith('mean_disp_global')),
+               ('speed SIFT', lambda n: n.startswith('sift_'))],
+}
+
+
+def _name_prefix(name):
+    """ the name without a trailing _<number> index, e.g. 'thresh_adj_stat_3' -> 'thresh_adj_stat' """
+    import re
+    return re.sub(r'_?\d+$', '', name) or name
+
+
+def sam_feature_groups(feature_names, feature_sets=None):
     r""" The SAM feature set (shape, appearance, motion) and feature group of each feature, from its name.
 
     The groups are the feature families of the SAM phenome (see SAM_FEATURE_GROUPS):
@@ -461,27 +475,44 @@ def sam_feature_groups(feature_names):
     ----------
     feature_names : (n_feats,) array of str
         the feature names returned by the SAM feature functions
+    feature_sets : None or (n_feats,) array of str
+        the SAM set ('shape', 'appearance', 'motion') of each feature, if known (e.g. from the file the feature was read
+        from). Needed for older exports where appearance and motion SIFT features were both named 'sift_<n>'. Names that
+        are not recognised within their set form their own group(s) of that set, by name prefix.
 
     Returns
     -------
     feature_sets : (n_feats,) str array
-        'shape', 'appearance', 'motion', or 'other' for names that are not SAM features
+        'shape', 'appearance', 'motion', or 'other' for unrecognised names when feature_sets is not given
     feature_groups : (n_feats,) str array
-        the feature group, or the feature name itself for 'other' features
+        the feature group; unrecognised names are grouped by their name prefix
     """
     import numpy as np
+    names = np.asarray(feature_names).astype(str)
+    given = None if feature_sets is None else np.asarray(feature_sets).astype(str)
     sets, groups = [], []
-    for name in np.asarray(feature_names).astype(str):
-        for s, g, rule in SAM_FEATURE_GROUPS:
+    for ii, name in enumerate(names):
+        hint = None if given is None else given[ii]
+        # SPOT.Utility_Functions.file_io suffixes appearance / motion columns with duplicate names when merging tables
+        for suffix, s in (('_appear', 'appearance'), ('_motion', 'motion')):
+            if name.endswith(suffix) and not name.startswith('sift_motion'):
+                name, hint = name[:-len(suffix)], hint or s
+        if hint is None:
+            rules = SAM_FEATURE_GROUPS + [('motion', g, rule) for g, rule in _LEGACY_GROUPS['motion'] if g == 'global motion']
+        else:
+            rules = [r for r in SAM_FEATURE_GROUPS if r[0] == hint] +                     [(hint, g, rule) for g, rule in _LEGACY_GROUPS.get(hint, [])]
+        for s, g, rule in rules:
             if rule(name):
                 sets.append(s); groups.append(g)
                 break
         else:
-            sets.append('other'); groups.append(name)
+            sets.append('other' if hint is None else hint)
+            groups.append(_name_prefix(name))
     return np.array(sets), np.array(groups)
 
 
-def weight_sam_features(all_feats, feature_names, group_weighting=True, set_weighting=True, return_weights=False):
+def weight_sam_features(all_feats, feature_names, group_weighting=True, set_weighting=True, feature_sets=None,
+                        return_weights=False):
     r""" Weight already normalised (e.g. standard scaled and power transformed) SAM features so that each feature set
     and each feature group contributes equally to distances (e.g. for UMAP, clustering), instead of in proportion to
     its number of features.
@@ -492,7 +523,8 @@ def weight_sam_features(all_feats, feature_names, group_weighting=True, set_weig
           inputs every feature then counts equally, so large groups dominate), and
         - every SAM set (shape, appearance, motion) has total variance 1 (set_weighting=True), or keeps its total
           variance (set_weighting=False).
-    Features that are not SAM features (see sam_feature_groups) form their own set with each feature its own group.
+    Features that are not recognised as SAM features (see sam_feature_groups) are grouped by name prefix, in their set if
+    feature_sets is given, else in an extra 'other' set (with a warning).
 
     Parameters
     ----------
@@ -505,6 +537,8 @@ def weight_sam_features(all_feats, feature_names, group_weighting=True, set_weig
         as the ~300 shape context features)
     set_weighting : bool
         give every SAM set the same total variance
+    feature_sets : None or (n_feats,) array of str
+        the SAM set of each feature if known, see sam_feature_groups
     return_weights : bool
         if True also return (mean, weight) such that the output is (all_feats - mean) * weight, to apply the same
         weighting to new data
@@ -518,7 +552,11 @@ def weight_sam_features(all_feats, feature_names, group_weighting=True, set_weig
     X = np.asarray(all_feats, dtype=np.float64)
     mean = np.nanmean(X, axis=0)
     var = np.nanvar(X, axis=0)
-    sets, groups = sam_feature_groups(feature_names)
+    sets, groups = sam_feature_groups(feature_names, feature_sets=feature_sets)
+    if (sets == 'other').any():
+        import warnings
+        warnings.warn('weight_sam_features: features not recognised as SAM features are weighted as an extra set: %s'
+                      % sorted(set(groups[sets == 'other'])))
     weight = np.zeros(X.shape[1])
     for s in dict.fromkeys(sets):
         in_set = sets == s

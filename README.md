@@ -32,6 +32,7 @@
 - Python 3.9 - 3.13 and NumPy 2 supported. TensorFlow is no longer a core dependency (`pip install SAM-SPOT[detection]` for the PyTorch detection / segmentation networks).
 - Faster SAM phenome extraction: `*_fast` (optimised CPU, parallel over objects with `n_jobs`) and `*_torch` (GPU) variants of the shape, appearance and motion functions, with the same outputs. See [Faster extraction](#faster-extraction).
 - Masked appearance and motion features (`use_mask=True`) that describe only the object interior and do not leak shape.
+- Equal weighting of the SAM feature sets and feature families for embeddings: `SPOT.Analysis.preprocessing.weight_sam_features(feats, names, group_weighting=True, set_weighting=True)` gives shape, appearance and motion the same total variance and, within each, every feature family (e.g. curvature vs shape context, Haralick vs SIFT, speed vs curl SIFT) the same weight.
 
 #### Aug 2026
 - Both SPOT methods and application papers published in Nature Communcations!

@@ -292,10 +292,20 @@ if __name__=="__main__":
     # =============================================================================
     #      Now we do the dynamic phenotyping analysis
     # ============================================================================= 
+    # Equal weighting for the embedding: each SAM set (shape, appearance, motion) gets the same total variance and, if
+    # sam_group_weighting, so does every feature group within a set (e.g. the curvature features count as much as the
+    # shape context features). Set both to False to embed the features as they are (every feature counts equally).
+    sam_set_weighting = True
+    sam_group_weighting = True
+    embed_feats = preprocess.weight_sam_features(all_feats.astype(np.float64), 
+                                                 feature_names, 
+                                                 group_weighting=sam_group_weighting, 
+                                                 set_weighting=sam_set_weighting)
+    
     umap_fit = umap.UMAP(n_neighbors=100, 
                           random_state=0,
                           metric='euclidean') # this seems to look better?
-    uu = umap_fit.fit_transform(all_feats.astype(np.float64)) 
+    uu = umap_fit.fit_transform(embed_feats) 
     
     
     """
