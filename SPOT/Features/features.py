@@ -827,7 +827,9 @@ def compute_boundary_morphology_features(boundaries, imshape,
                                          n_ref_pts_scm=5,
                                          pixel_xy_res=1.,
                                          timesample=None,
-                                         fourier_remove_closing_point=False):
+                                         fourier_remove_closing_point=False,
+                                         fast=True,
+                                         n_jobs=1):
     """ Master function for extracting all shape-based features described in the SAM paper.
     
     Parameters
@@ -868,6 +870,11 @@ def compute_boundary_morphology_features(boundaries, imshape,
         original features.
     
 
+    fast : bool
+        if True (default), run the optimised implementation compute_boundary_morphology_features_fast (identical output for n_jobs=1, see its
+        docstring); False runs the original implementation.
+    n_jobs : int
+        number of parallel processes over objects / frames of the fast implementation (joblib, -1 = all CPUs)
     Returns 
     -------
     out_array : (n_organoids, n_frames, n_features) array
@@ -878,6 +885,9 @@ def compute_boundary_morphology_features(boundaries, imshape,
         a boolean vector where 1 or True means the feature is normalised i.e. dimensionless. 
 
     """
+    if fast:
+        return compute_boundary_morphology_features_fast(boundaries, imshape, all_feats_compute=all_feats_compute, contour_curve_feats=contour_curve_feats, curve_order=curve_order, curve_err=curve_err, geom_features=geom_features, morph_features=morph_features, fourier_features=fourier_features, ect_features=ect_features, shape_context_features=shape_context_features, norm_scm=norm_scm, n_ref_pts_scm=n_ref_pts_scm, pixel_xy_res=pixel_xy_res, timesample=timesample, fourier_remove_closing_point=fourier_remove_closing_point, n_jobs=n_jobs)
+
     # =============================================================================
     #   Given boundaries produced from the organoid tracker, compute shape morphology and boundary features of interest.
     #   give some optional extractions.
@@ -1618,11 +1628,13 @@ def compute_boundary_texture_features(vid, boundaries,
                             compute_haralick=True,
                             haralick_distance=15,
                             timesample=None,
-                            use_mask=False,
+                            use_mask=True,
                             masked_sift_resize='cap',
                             masks=None,
                             masked_haralick_levels=8,
-                            masked_haralick_range=None):
+                            masked_haralick_range=None,
+                            fast=True,
+                            n_jobs=1):
 
     """ Compute the Appearance (or texture) features for given tracked organoid contour boundaries
 
@@ -1655,7 +1667,7 @@ def compute_boundary_texture_features(vid, boundaries,
     timesample : None or int
         if specified, compute the feature every timesample # of frames. This can be done when in successive frames, the variation does not vary a lot and one wishes to speed up computation or save on memory
     use_mask : bool
-        if False (default, original SAM behaviour), Haralick and SIFT are computed on the full bounding box crop, so the background and the object outline contribute and these features partially encode shape. If True, Haralick uses only co-occurring pixel pairs inside the shape mask and SIFT uses only gradients inside the shape mask (with the boundary step edge removed), mean-pooled over shape-adapted ring x sector cells instead of a fixed square grid (see _masked_sift_descriptor), so the features describe internal appearance only. Intensity and regional intensity features are always masked.
+        True by default. If False (the original SAM behaviour), Haralick and SIFT are computed on the full bounding box crop, so the background and the object outline contribute and these features partially encode shape. If True, Haralick uses only co-occurring pixel pairs inside the shape mask and SIFT uses only gradients inside the shape mask (with the boundary step edge removed), mean-pooled over shape-adapted ring x sector cells instead of a fixed square grid (see _masked_sift_descriptor), so the features describe internal appearance only. Intensity and regional intensity features are always masked.
     masked_sift_resize : 'cap', 'square' or 'native'
         only used if use_mask=True. How the masked patch is rescaled before SIFT. 'cap' (default): downscale preserving aspect ratio so the longest axis is at most max(siftshape). 'square': resize to siftshape as the unmasked SIFT. 'native': no rescaling.
     masks : None or (n_frames, n_rows, n_cols) binary array
@@ -1665,6 +1677,11 @@ def compute_boundary_texture_features(vid, boundaries,
     masked_haralick_range : None or (min, max)
         intensity range quantised into masked_haralick_levels. If None, the full range of the integer dtype of vid (e.g. [0,255] for uint8), or the min/max of vid for float images (which then depends on pixels outside the objects). For integer images using a small part of their dtype range (e.g. 12-bit data in uint16), pass the actual range.
 
+    fast : bool
+        if True (default), run the optimised implementation compute_boundary_texture_features_fast (identical output for n_jobs=1, see its
+        docstring); False runs the original implementation.
+    n_jobs : int
+        number of parallel processes over objects / frames of the fast implementation (joblib, -1 = all CPUs)
     Returns
     -------
     out_array : (n_organoids, n_frames, n_features) array
@@ -1675,6 +1692,9 @@ def compute_boundary_texture_features(vid, boundaries,
         a boolean vector where 1 or True means the feature is normalised i.e. dimensionless. 
 
     """
+    if fast:
+        return compute_boundary_texture_features_fast(vid, boundaries, use_gradient_vid=use_gradient_vid, compute_all_feats=compute_all_feats, compute_intensity_feats=compute_intensity_feats, compute_contour_intensity_feats=compute_contour_intensity_feats, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start, compute_sift=compute_sift, siftshape=siftshape, compute_haralick=compute_haralick, haralick_distance=haralick_distance, timesample=timesample, use_mask=use_mask, masked_sift_resize=masked_sift_resize, masks=masks, masked_haralick_levels=masked_haralick_levels, masked_haralick_range=masked_haralick_range, n_jobs=n_jobs)
+
     # boundaries should be at least (n_orgs, timepoints, discretisation, 2)
     # from sklearn.metrics.pairwise import pairwise_distances
     import mahotas as mh  # requires mahotas.
@@ -2022,9 +2042,11 @@ def compute_boundary_motion_features(vid_flow,
                                      compute_sift_feats=True,
                                      siftshape=(64,64),
                                      timesample=None,
-                                     use_mask=False,
+                                     use_mask=True,
                                      masked_sift_resize='cap',
-                                     masks=None):
+                                     masks=None,
+                                     fast=True,
+                                     n_jobs=1):
     """ Compute the Motion features for given tracked organoid contour boundaries. Can only computed for a video as opposed to shape and appearance. 
 
     Parameters
@@ -2060,12 +2082,17 @@ def compute_boundary_motion_features(vid_flow,
     timesample : None or int
         if specified, compute the feature every timesample # of frames. This can be done when in successive frames, the variation does not vary a lot and one wishes to speed up computation or save on memory
     use_mask : bool
-        if False (default, original SAM behaviour), the speed, curl and divergence SIFT descriptors are computed on the bounding box crop with the pixels *inside* the shape set to 0, so they mainly encode the background flow and the object outline i.e. shape. If True, curl and divergence are recomputed from the flow inside the shape mask only (so the flow discontinuity at the boundary does not leak in) and the SIFT descriptors use only gradients of pixels inside the shape mask (with the boundary step edge removed), mean-pooled over shape-adapted ring x sector cells instead of a fixed square grid (see _masked_sift_descriptor), so they describe internal motion only. Global and regional speed statistics are always masked.
+        True by default. If False (the original SAM behaviour), the speed, curl and divergence SIFT descriptors are computed on the bounding box crop with the pixels *inside* the shape set to 0, so they mainly encode the background flow and the object outline i.e. shape. If True, curl and divergence are recomputed from the flow inside the shape mask only (so the flow discontinuity at the boundary does not leak in) and the SIFT descriptors use only gradients of pixels inside the shape mask (with the boundary step edge removed), mean-pooled over shape-adapted ring x sector cells instead of a fixed square grid (see _masked_sift_descriptor), so they describe internal motion only. Global and regional speed statistics are always masked.
     masked_sift_resize : 'cap', 'square' or 'native'
         only used if use_mask=True. How the masked patch is rescaled before SIFT. 'cap' (default): downscale preserving aspect ratio so the longest axis is at most max(siftshape). 'square': resize to siftshape as the unmasked SIFT. 'native': no rescaling.
     masks : None or (n_frames, n_rows, n_cols) binary array
         only used if use_mask=True. Optional foreground segmentation masks intersected with the contour mask, for when the boundary contour is coarser than the object and would include background pixels.
 
+    fast : bool
+        if True (default), run the optimised implementation compute_boundary_motion_features_fast (identical output for n_jobs=1, see its
+        docstring); False runs the original implementation.
+    n_jobs : int
+        number of parallel processes over objects / frames of the fast implementation (joblib, -1 = all CPUs)
     Returns
     -------
     out_array : (n_organoids, n_frames, n_features) array
@@ -2076,6 +2103,9 @@ def compute_boundary_motion_features(vid_flow,
         a boolean vector where 1 or True means the feature is normalised i.e. dimensionless. 
 
     """
+    if fast:
+        return compute_boundary_motion_features_fast(vid_flow, boundaries, compute_all_feats=compute_all_feats, compute_global_feats=compute_global_feats, compute_contour_feats=compute_contour_feats, n_contour_feat_bins=n_contour_feat_bins, cnt_sigma=cnt_sigma, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start, pixel_res=pixel_res, time_res=time_res, compute_sift_feats=compute_sift_feats, siftshape=siftshape, timesample=timesample, use_mask=use_mask, masked_sift_resize=masked_sift_resize, masks=masks, n_jobs=n_jobs)
+
     # boundaries should be at least (n_orgs, timepoints, discretisation, 2)
     # vid_flow is (timepoints-1,  nrows, ncols, 2) (in x,y) format.
     import skimage.transform as sktform
@@ -3077,7 +3107,7 @@ def compute_boundary_texture_features_fast(vid, boundaries,
                                            compute_haralick=True,
                                            haralick_distance=15,
                                            timesample=None,
-                                           use_mask=False,
+                                           use_mask=True,
                                            masked_sift_resize='cap',
                                            masks=None,
                                            masked_haralick_levels=8,
@@ -3328,7 +3358,7 @@ def compute_boundary_motion_features_fast(vid_flow,
                                           compute_sift_feats=True,
                                           siftshape=(64,64),
                                           timesample=None,
-                                          use_mask=False,
+                                          use_mask=True,
                                           masked_sift_resize='cap',
                                           masks=None,
                                           n_jobs=1):

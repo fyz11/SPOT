@@ -28,7 +28,7 @@ def assert_matches_golden(feats, labels, g_feats, g_labels):
 @pytest.mark.parametrize('key,fn_name,kw', CALLS, ids=[c[0] for c in CALLS])
 def test_original_matches_golden(case_data, key, fn_name, kw):
     case, d = case_data
-    feats, labels, norm = run_quiet(getattr(sf, fn_name), **kw(d))
+    feats, labels, norm = run_quiet(getattr(sf, fn_name), fast=False, **kw(d))  # the original implementation
     g_feats, g_labels, g_norm = load_golden(case, key)
     assert np.array_equal(np.asarray(norm).astype(bool), g_norm)
     assert_matches_golden(feats, labels, g_feats, g_labels)

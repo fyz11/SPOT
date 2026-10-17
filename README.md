@@ -30,9 +30,10 @@
 
 #### Oct 2026
 - Python 3.9 - 3.13 and NumPy 2 supported. TensorFlow is no longer a core dependency (`pip install SAM-SPOT[detection]` for the PyTorch detection / segmentation networks).
-- Faster SAM phenome extraction: `*_fast` (optimised CPU, parallel over objects with `n_jobs`) and `*_torch` (GPU) variants of the shape, appearance and motion functions, with the same outputs. See [Faster extraction](#faster-extraction).
-- Masked appearance and motion features (`use_mask=True`) that describe only the object interior and do not leak shape.
-- Equal weighting of the SAM feature sets and feature families for embeddings: `SPOT.Analysis.preprocessing.weight_sam_features(feats, names, group_weighting=True, set_weighting=True)` gives shape, appearance and motion the same total variance and, within each, every feature family (e.g. curvature vs shape context, Haralick vs SIFT, speed vs curl SIFT) the same weight.
+- Faster SAM phenome extraction: the shape, appearance and motion functions now run an optimised implementation by default (`fast=True`, parallel over objects / frames with `n_jobs`), and `*_torch` GPU variants are available, with the same outputs. See [Faster extraction](#faster-extraction).
+- **New default:** the appearance and motion features are masked (`use_mask=True`): they describe only the object interior and do not leak shape. Use `use_mask=False` for the original SAM features.
+- Recommended for analysis: equal weighting of the SAM feature sets and feature families for embeddings and clustering: `SPOT.Analysis.preprocessing.weight_sam_features(feats, names, group_weighting=True, set_weighting=True)` gives shape, appearance and motion the same total variance and, within each, every feature family (e.g. curvature vs shape context, Haralick vs SIFT, speed vs curl SIFT) the same weight.
+- Optional, depending on the experimental design: regressing out confounders such as size, intensity or batch (`regress_out_confounders`), and rotation-averaged features (`SPOT.Features.augment`).
 
 #### Aug 2026
 - Both SPOT methods and application papers published in Nature Communcations!
@@ -109,14 +110,14 @@ metrics, metrics_labels, metrics_norm_bool = SPOT_SAM_features.compute_boundary_
 
 <!-- TOC --><a name="faster-extraction"></a>
 #### Faster extraction
-Each of the three functions has two variants with the same arguments and outputs:
+By default `compute_boundary_*_features` run the optimised CPU implementation (`fast=True`; `fast=False` runs the original implementation) and accept `n_jobs` to process objects / frames in parallel. The implementations are also available directly:
 - `compute_boundary_*_features_fast(..., n_jobs=1)`: optimised CPU implementation (bounding box instead of full-frame rasterisation, curl/divergence once per frame, vectorised Euler characteristic transform and shape context), parallel over objects with `n_jobs` (-1 = all CPUs). Identical outputs for `n_jobs=1`; in parallel the BLAS-based Haralick statistics can differ in floating point round-off.
 - `SPOT.Features.features_torch.compute_boundary_*_features_torch(..., device='cuda')`: GPU implementation (requires PyTorch, `pip install SAM-SPOT[gpu]`). Polygon rasterisation, Haralick features, SIFT descriptors, the Euler characteristic transform and curl/divergence are batched on the GPU; the remaining steps run on the CPU. Outputs match the original functions up to float64 round-off.
 ```
 import SPOT.Features.features as SPOT_SAM_features
 import SPOT.Features.features_torch as SPOT_SAM_features_torch
 
-metrics, metrics_labels, metrics_norm_bool = SPOT_SAM_features.compute_boundary_texture_features_fast(vid, boundaries, n_jobs=-1)
+metrics, metrics_labels, metrics_norm_bool = SPOT_SAM_features.compute_boundary_texture_features(vid, boundaries, n_jobs=-1)
 metrics, metrics_labels, metrics_norm_bool = SPOT_SAM_features_torch.compute_boundary_texture_features_torch(vid, boundaries, device='cuda')
 ```
 See `benchmarks/benchmark_results.md` for timings.
@@ -143,7 +144,9 @@ Features that remain strongly associated with a confound after the correction (|
 Only regress out effects that are truly undesired: on MPEG-7 x Brodatz, regressing out size also removes much of what separates the shapes.
 
 #### Masked appearance and motion features
-By default the Haralick and SIFT appearance features and the motion SIFT descriptors are computed on the bounding box crop of the object, so they also describe its outline. With `use_mask=True` they only use the pixels inside the object (optionally intersected with foreground segmentation `masks` when the contours are coarse), so appearance and motion do not double count shape.
+By default (`use_mask=True`) the Haralick and SIFT appearance features and the motion SIFT descriptors only use the pixels inside the object (optionally intersected with foreground segmentation `masks` when the contours are coarse), so appearance and motion do not double count shape. The masked SIFT descriptors are computed on the object patch with its longest side capped at 64 pixels (`masked_sift_resize='cap'`, `siftshape=(64, 64)`), similar to the 64 x 64 patches of the original SIFT features. With `use_mask=False` they are computed on the bounding box crop of the object, as in the original SAM phenome, and also describe its outline.
+
+For embeddings and clustering of the SAM phenome we recommend `weight_sam_features` (after the per-feature normalisation), so that every SAM set and feature family contributes equally.
 
 <!-- TOC --><a name="associated-papers"></a>
 ## Associated Papers

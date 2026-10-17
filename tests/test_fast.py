@@ -15,7 +15,7 @@ _ORIGINAL = {}
 
 def original(case, d, key, fn_name, kw):
     if (case, key) not in _ORIGINAL:
-        _ORIGINAL[(case, key)] = run_quiet(getattr(sf, fn_name), **kw(d))
+        _ORIGINAL[(case, key)] = run_quiet(getattr(sf, fn_name), fast=False, **kw(d))
     return _ORIGINAL[(case, key)]
 
 
@@ -79,3 +79,20 @@ def test_fast_parallel_over_frames_single_object(fn_name):
     f3, l3, _ = run_quiet(getattr(sf, fn_name + '_fast'), n_jobs=3, **kw)
     assert list(l1) == list(l3)
     np.testing.assert_allclose(np.asarray(f3, np.float64), np.asarray(f1, np.float64), rtol=1e-10, atol=1e-12, equal_nan=True)
+
+
+def test_defaults_are_fast_and_masked(case_data):
+    """ the public functions run the fast implementation and the masked appearance / motion features by default """
+    import inspect
+    case, d = case_data
+    for fn in (sf.compute_boundary_texture_features, sf.compute_boundary_motion_features,
+               sf.compute_boundary_texture_features_fast, sf.compute_boundary_motion_features_fast):
+        p = inspect.signature(fn).parameters
+        assert p['use_mask'].default is True and p['masked_sift_resize'].default == 'cap'
+        assert p['siftshape'].default == (64, 64)
+    for fn in (sf.compute_boundary_morphology_features, sf.compute_boundary_texture_features,
+               sf.compute_boundary_motion_features):
+        assert inspect.signature(fn).parameters['fast'].default is True
+    a = run_quiet(sf.compute_boundary_texture_features, vid=d['vid'], boundaries=d['boundaries'])[0]
+    b = run_quiet(sf.compute_boundary_texture_features, vid=d['vid'], boundaries=d['boundaries'], fast=False, use_mask=True)[0]
+    assert np.array_equal(np.asarray(a, np.float64), np.asarray(b, np.float64), equal_nan=True)

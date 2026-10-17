@@ -19,7 +19,7 @@ _ORIGINAL = {}
 
 def original(case, d, key, fn_name, kw):
     if (case, key) not in _ORIGINAL:
-        _ORIGINAL[(case, key)] = run_quiet(getattr(sf, fn_name), **kw(d))
+        _ORIGINAL[(case, key)] = run_quiet(getattr(sf, fn_name), fast=False, **kw(d))
     return _ORIGINAL[(case, key)]
 
 

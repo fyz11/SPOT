@@ -25,7 +25,7 @@ import SPOT.Features.features as sf  # noqa: E402
 
 def run(fn_name, kwargs):
     with contextlib.redirect_stderr(io.StringIO()):
-        return getattr(sf, fn_name)(**kwargs)
+        return getattr(sf, fn_name)(fast=False, **kwargs)  # the original implementation
 
 
 if __name__ == '__main__':

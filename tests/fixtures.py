@@ -114,7 +114,8 @@ def calls():
     """(key, function name, kwargs builder) for every configuration covered by the goldens."""
     c = [('morphology', 'compute_boundary_morphology_features',
           lambda d: dict(boundaries=d['boundaries'], imshape=d['imshape']))]
-    c.append(('texture', 'compute_boundary_texture_features', lambda d: dict(vid=d['vid'], boundaries=d['boundaries'])))
+    c.append(('texture', 'compute_boundary_texture_features',
+              lambda d: dict(vid=d['vid'], boundaries=d['boundaries'], use_mask=False)))
     for mode in ('cap', 'square', 'native'):
         c.append(('texture_masked_%s' % mode, 'compute_boundary_texture_features',
                   lambda d, mode=mode: dict(vid=d['vid'], boundaries=d['boundaries'], use_mask=True,
@@ -122,7 +123,7 @@ def calls():
     c.append(('texture_masked_contour_only', 'compute_boundary_texture_features',
               lambda d: dict(vid=d['vid'], boundaries=d['boundaries'], use_mask=True)))
     c.append(('motion', 'compute_boundary_motion_features',
-              lambda d: dict(vid_flow=d['flow'], boundaries=d['boundaries'], pixel_res=2., time_res=3.)))
+              lambda d: dict(vid_flow=d['flow'], boundaries=d['boundaries'], pixel_res=2., time_res=3., use_mask=False)))
     c.append(('motion_masked', 'compute_boundary_motion_features',
               lambda d: dict(vid_flow=d['flow'], boundaries=d['boundaries'], use_mask=True, masks=d['masks'])))
     return c
