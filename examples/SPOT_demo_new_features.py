@@ -18,7 +18,7 @@
 # 1. SAM phenome extraction with the new defaults (masked appearance / motion, fast parallel implementation) and the GPU variants
 # 2. Masked vs unmasked appearance: the appearance features no longer encode shape
 # 3. Normalisation and equal weighting of the SAM sets and feature families (`weight_sam_features`)
-# 4. Regressing out confounders: size and batch (`regress_out_confounders`)
+# 4. Regressing out confounders: the batch by default, nuisances such as illumination per dataset (`regress_out_confounders`)
 # 5. Rotation-invariant features (`compute_rotation_averaged_features`)
 # 6. Multi-scale SAM module selection (`hierarchical_cluster_features_into_SAM_modules`)
 # 7. UMAP and PaCMAP embeddings
@@ -246,29 +246,41 @@ print((share / share.sum()).round(3))
 
 # %% [markdown]
 # ## 4. Regressing out confounders
-# The illumination of each cell (measured by its mean intensity) and the plate (batch) are undesired here.
-# `confound_association` measures each feature's association with the confounders (|Spearman rho| for continuous,
-# between-batch variance share eta^2 for categorical ones). `regress_out_confounders` removes them (cubic spline of the
-# rank for continuous covariates, mean and optionally scale per batch; `reference=` fits on e.g. control cells only) and
-# drops features that remain associated (`drop_associated=True`).
+# The default confounder is the **batch** (plate, experiment, imaging session). `regress_out_confounders` removes the
+# mean (and optionally scale, `batch_scale=True`) of every batch; `reference=` fits on e.g. control cells only, so
+# condition differences are not regressed away. Features that remain associated are dropped (`drop_associated=True`).
+# `confound_association` measures the association of each feature with a confounder (between-batch variance share
+# eta^2 for categorical, |Spearman rho| for continuous ones).
 #
-# Only regress out what is truly undesired. Cell size, for example, differs between the phenotypes here: regressing it
-# out would remove much of what separates them (try `continuous={'size': raw['equivalent_diameter']}`).
+# Continuous covariates such as size or intensity are set **per dataset**, only when they are nuisances there. In this
+# dataset the illumination of each cell (measured by its mean intensity) is one, so it is added in a second step. Cell
+# size, by contrast, differs between the phenotypes here: regressing it out would remove much of what separates them.
 
 # %%
-intensity = raw['mean_intensity'].to_numpy()
 plate = meta['plate'].to_numpy()
-cov = dict(continuous={'intensity': intensity}, categorical={'plate': plate})
-before = preprocess.confound_association(X, feat_names, **cov)
-Xc, names_c, model = preprocess.regress_out_confounders(X, feature_names=feat_names, return_model=True, **cov)
-after = preprocess.confound_association(Xc, names_c, **cov)
-summary = pd.DataFrame({'median before': before.groupby('covariate').association.median(),
-                        'median after': after.groupby('covariate').association.median(),
-                        'max before': before.groupby('covariate').association.max(),
-                        'max after': after.groupby('covariate').association.max()})
-print(summary.round(3))
-print('%d features dropped as still associated, e.g. %s' % (len(model.dropped_features_),
-                                                            list(model.dropped_features_[:5])))
+CONTINUOUS_CONFOUNDS = {'intensity': raw['mean_intensity'].to_numpy()}  # per dataset; {} for none
+
+
+def confound_summary(Xa, na, Xb, nb, **cov):
+    before = preprocess.confound_association(Xa, na, **cov)
+    after = preprocess.confound_association(Xb, nb, **cov)
+    return pd.DataFrame({'median before': before.groupby('covariate').association.median(),
+                         'median after': after.groupby('covariate').association.median(),
+                         'max before': before.groupby('covariate').association.max(),
+                         'max after': after.groupby('covariate').association.max()}).round(3)
+
+
+# default: batch only
+Xb, names_b, model_b = preprocess.regress_out_confounders(X, feature_names=feat_names, categorical={'plate': plate},
+                                                          return_model=True)
+print('batch only (%d features dropped):' % len(model_b.dropped_features_))
+print(confound_summary(X, feat_names, Xb, names_b, categorical={'plate': plate}, continuous=CONTINUOUS_CONFOUNDS))
+
+# this dataset: batch + illumination
+Xc, names_c, model = preprocess.regress_out_confounders(X, feature_names=feat_names, categorical={'plate': plate},
+                                                        continuous=CONTINUOUS_CONFOUNDS, return_model=True)
+print('batch + %s (%d features dropped):' % (', '.join(CONTINUOUS_CONFOUNDS), len(model.dropped_features_)))
+print(confound_summary(X, feat_names, Xc, names_c, categorical={'plate': plate}, continuous=CONTINUOUS_CONFOUNDS))
 
 # %% [markdown]
 # ## 5. Rotation-invariant features
@@ -346,8 +358,9 @@ for ax, (name, Z) in zip(axes, embeddings.items()):
     ax.set_title('%s (10-NN phenotype accuracy %.2f)' % (name, knn_accuracy(Z))); ax.set_xticks([]); ax.set_yticks([])
 axes[0].legend()
 show(fig, '7_embeddings.png')
-print('10-NN phenotype accuracy in feature space: unweighted %.2f, weighted %.2f, confound-corrected + weighted %.2f'
-      % (knn_accuracy(X), knn_accuracy(Xw), knn_accuracy(Xcw)))
+print('10-NN phenotype accuracy in feature space: unweighted %.2f, weighted %.2f, batch-corrected + weighted %.2f, '
+      'batch + illumination-corrected + weighted %.2f'
+      % (knn_accuracy(X), knn_accuracy(Xw), knn_accuracy(preprocess.weight_sam_features(Xb, names_b)), knn_accuracy(Xcw)))
 
 # %% [markdown]
 # ## 8. Pretrained detection and segmentation networks (PyTorch, from Zenodo)

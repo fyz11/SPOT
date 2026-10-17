@@ -34,7 +34,7 @@
 - Faster SAM phenome extraction: the shape, appearance and motion functions now run an optimised implementation by default (`fast=True`, parallel over objects / frames with `n_jobs`), and `*_torch` GPU variants are available, with the same outputs. See [Faster extraction](#faster-extraction).
 - **New default:** the appearance and motion features are masked (`use_mask=True`): they describe only the object interior and do not leak shape. Use `use_mask=False` for the original SAM features.
 - Recommended for analysis: equal weighting of the SAM feature sets and feature families for embeddings and clustering: `SPOT.Analysis.preprocessing.weight_sam_features(feats, names, group_weighting=True, set_weighting=True)` gives shape, appearance and motion the same total variance and, within each, every feature family (e.g. curvature vs shape context, Haralick vs SIFT, speed vs curl SIFT) the same weight.
-- Optional, depending on the experimental design: regressing out confounders such as size, intensity or batch (`regress_out_confounders`), and rotation-averaged features (`SPOT.Features.augment`).
+- Optional, depending on the experimental design: regressing out confounders (`regress_out_confounders`; by default only the batch, with size, intensity etc. chosen per dataset), and rotation-averaged features (`SPOT.Features.augment`).
   To enforce rotation invariance, `compute_rotation_averaged_features` also replaces the SIFT bins that the averaging makes equivalent (the 4 bins of each quarter-turn orbit) by one feature per orbit, 32 instead of 128 per descriptor (`collapse_sift=True`, default; `False` keeps all bins).
 - **New default:** multi-scale selection of the number of SAM modules (`hierarchical_cluster_features_into_SAM_modules(..., module_selection='multiscale')`). See [SAM module selection](#sam-module-selection).
 - Demo of all the new features on a self-contained synthetic time-lapse: [`examples/SPOT_demo_new_features.ipynb`](examples/SPOT_demo_new_features.ipynb) (notebook) and `examples/SPOT_demo_new_features.py` (script).
@@ -140,12 +140,17 @@ metrics, metrics_labels, metrics_norm_bool = SPOT_augment.compute_rotation_avera
 ```
 import SPOT.Analysis.preprocessing as preprocess
 
+# default: the batch (plate, experiment, imaging session) only
 all_feats_corrected, feature_names_corrected = preprocess.regress_out_confounders(all_feats, feature_names=feature_names,
-                                                         covariate_features=['equivalent_diameter', 'mean_intensity'],
                                                          categorical={'batch': batch_ids})
+
+# per dataset, if e.g. cell size or illumination are nuisances (and not part of the phenotype studied), add them:
+all_feats_corrected, feature_names_corrected = preprocess.regress_out_confounders(all_feats, feature_names=feature_names,
+                                                         categorical={'batch': batch_ids},
+                                                         covariate_features=['mean_intensity'])  # taken from the features
 ```
 Features that remain strongly associated with a confound after the correction (|Spearman rho| > 0.3 or batch eta^2 > 0.1, e.g. step-like dependences a smooth curve cannot remove) are dropped (`drop_associated=True`, thresholds `max_abs_rho`, `max_eta2`).
-Only regress out effects that are truly undesired: on MPEG-7 x Brodatz, regressing out size also removes much of what separates the shapes.
+Batch is the default confounder. Continuous covariates such as size or intensity are set per dataset, and only when they are truly undesired there: on MPEG-7 x Brodatz, for example, regressing out size also removes much of what separates the shapes.
 
 #### Masked appearance and motion features
 By default (`use_mask=True`) the Haralick and SIFT appearance features and the motion SIFT descriptors only use the pixels inside the object (optionally intersected with foreground segmentation `masks` when the contours are coarse), so appearance and motion do not double count shape. The masked SIFT descriptors are computed on the object patch with its longest side capped at 64 pixels (`masked_sift_resize='cap'`, `siftshape=(64, 64)`), similar to the 64 x 64 patches of the original SIFT features. With `use_mask=False` they are computed on the bounding box crop of the object, as in the original SAM phenome, and also describe its outline. Bug fix: the unmasked motion SIFT descriptors (speed, curl, divergence) set the flow *inside* the object to 0, contrary to their intent, so they described the background flow and the object outline; the flow outside the object is now set to 0.

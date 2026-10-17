@@ -300,13 +300,16 @@ if __name__=="__main__":
     sam_set_weighting = True
     sam_group_weighting = True
     
-    # Optionally regress out confounding effects (e.g. size, intensity, batch) before embedding.
-    regress_confounders = False
-    if regress_confounders:
+    # Optionally regress out confounding effects before embedding. By default only the batch (e.g. plate / experiment
+    # id of every object; None = no batch). Continuous covariates are chosen per dataset, only if they are nuisances
+    # there, e.g. ['equivalent_diameter', 'mean_intensity'] (taken from the features).
+    batch_ids = None
+    continuous_confound_features = []
+    if batch_ids is not None or len(continuous_confound_features) > 0:
         all_feats, feature_names = preprocess.regress_out_confounders(all_feats.astype(np.float64), 
                                                        feature_names=feature_names, 
-                                                       covariate_features=['equivalent_diameter', 'mean_intensity'], # covariates taken from the features
-                                                       categorical=None) # e.g. {'batch': batch_ids}
+                                                       categorical=None if batch_ids is None else {'batch': batch_ids},
+                                                       covariate_features=continuous_confound_features or None)
     embed_feats = preprocess.weight_sam_features(all_feats.astype(np.float64), 
                                                  feature_names, 
                                                  group_weighting=sam_group_weighting, 
