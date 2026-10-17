@@ -37,6 +37,7 @@
 - Optional, depending on the experimental design: regressing out confounders such as size, intensity or batch (`regress_out_confounders`), and rotation-averaged features (`SPOT.Features.augment`).
   To enforce rotation invariance, `compute_rotation_averaged_features` also replaces the SIFT bins that the averaging makes equivalent (the 4 bins of each quarter-turn orbit) by one feature per orbit, 32 instead of 128 per descriptor (`collapse_sift=True`, default; `False` keeps all bins).
 - **New default:** multi-scale selection of the number of SAM modules (`hierarchical_cluster_features_into_SAM_modules(..., module_selection='multiscale')`). See [SAM module selection](#sam-module-selection).
+- Demo of all the new features on a self-contained synthetic time-lapse: [`examples/SPOT_demo_new_features.ipynb`](examples/SPOT_demo_new_features.ipynb) (notebook) and `examples/SPOT_demo_new_features.py` (script).
 
 #### Aug 2026
 - Both SPOT methods and application papers published in Nature Communcations!
