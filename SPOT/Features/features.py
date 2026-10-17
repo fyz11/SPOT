@@ -1195,7 +1195,7 @@ class DsiftExtractor:
         and the values of detected SIFT features.
         image: a M*N image which is a numpy 2D array. If you pass a color image, it will automatically be convertedto a grayscale image.
         positionNormalize: whether to normalize the positions to [0,1]. If False, the pixel-based positions of the top-right position of the patches is returned.
-        
+
         Return values:
         feaArr: the feature array, each row is a feature
         positions: the positions of the features
@@ -1219,7 +1219,7 @@ class DsiftExtractor:
         if verbose:
             print ('Image: w {}, h {}, gs {}, ps {}, nFea {}'.\
                     format(W,H,gS,pS,gridH.size))
-        feaArr = self.calculate_sift_grid(image,gridH,gridW) # this is the heavy lifting. 
+        feaArr = self.calculate_sift_grid(image,gridH,gridW) # this is the heavy lifting.
         feaArr = self.normalize_sift(feaArr)
         if positionNormalize:
             positions = np.vstack((gridH / np.double(H), gridW / np.double(W)))
@@ -1318,6 +1318,154 @@ def sobel_frame(im):
     sobel_im_ = np.uint8(255.*rescale_intensity(sobel(im_)))
 
     return sobel_im_
+
+
+def _fill_outside_mask_nearest(im, mask):
+    """ Replace every pixel outside the binary mask with the value of its nearest pixel inside the mask. This removes the artificial step edge at the mask boundary so that gradient-based descriptors do not respond to the shape outline.
+
+    Parameters
+    ----------
+    im : (n_rows, n_cols) image
+        input image
+    mask : (n_rows, n_cols) binary image
+        pixels to keep
+
+    Returns
+    -------
+    im_fill : (n_rows, n_cols) image
+        image with outside-mask pixels filled by nearest-neighbour extrapolation
+    """
+    mask = mask > 0
+    if mask.sum() == 0 or mask.all():
+        return im.copy()
+    inds = ndimage.distance_transform_edt(~mask, return_distances=False, return_indices=True)
+    return im[inds[0], inds[1]]
+
+
+def _masked_sift_descriptor(im, mask, resize='cap', siftshape=(64,64), n_rings=4, n_sectors=4):
+    """ Compute the global SIFT descriptor using only the image gradients within the binary mask, so the descriptor captures internal texture and not the shape outline.
+
+    Outside-mask pixels are filled by nearest-neighbour extrapolation to remove the boundary step edge, and SIFT orientation histograms are pooled only over mask pixels. Instead of the fixed 4x4 square grid of standard SIFT (whose empty cells would encode the shape), the spatial cells adapt to the mask: n_rings equal-area rings of distance from the boundary x n_sectors equal-angle sectors about the mask centroid. Each cell is the mean (not sum) over its pixels, so cell area does not encode shape either.
+
+    Parameters
+    ----------
+    im : (n_rows, n_cols) image
+        cropped image patch
+    mask : (n_rows, n_cols) binary image
+        binary shape mask of the same size as im
+    resize : 'cap', 'square' or 'native'
+        how the patch is rescaled before computing gradients. 'cap': downscale, preserving the aspect ratio, so the longest axis is at most max(siftshape), smaller patches are not upscaled (fast, and texture scale only changes for objects larger than the cap). 'square': resize to siftshape as standard SIFT does (the texture is stretched by the bounding box aspect ratio and rescaled with object size, which leaks shape). 'native': no rescaling (texture scale fully preserved, slowest for large objects).
+    siftshape : (size,size)
+        target size for resize='square'; max(siftshape) is the cap for resize='cap'
+    n_rings : int
+        number of equal-area rings, from the boundary inwards
+    n_sectors : int
+        number of equal-angle sectors about the mask centroid, starting from the +x axis
+
+    Returns
+    -------
+    sift_texture : (n_angles*n_rings*n_sectors,) array
+        unit-normalised SIFT descriptor, 128 dimensional by default as for standard SIFT
+    """
+    from scipy import signal
+    import skimage.transform as sktform
+
+    mask_rs = mask > 0
+    im_fill = _fill_outside_mask_nearest(im.astype(np.float64), mask_rs)
+
+    if resize == 'square':
+        out_shape = tuple(siftshape)
+    elif resize == 'cap':
+        scale = min(1., max(siftshape) / float(max(mask_rs.shape)))
+        out_shape = tuple(max(1, int(round(s*scale))) for s in mask_rs.shape)
+    elif resize == 'native':
+        out_shape = mask_rs.shape
+    else:
+        raise ValueError("resize must be 'cap', 'square' or 'native'")
+    if out_shape != mask_rs.shape:
+        im_fill = sktform.resize(im_fill, out_shape, preserve_range=True)
+        mask_rs = sktform.resize(mask_rs.astype(np.float64), out_shape, order=0, preserve_range=True, anti_aliasing=False) > 0
+
+    siftextractor = SingleSiftExtractor(64) # for the standard SIFT gradient filter, orientation binning and threshold parameters.
+    n_cells = n_rings * n_sectors
+    if mask_rs.sum() == 0:
+        return np.zeros(siftextractor.Nangles * n_cells)
+
+    # oriented gradient energies, as in DsiftExtractor.calculate_sift_grid. Symmetric padding avoids spurious edges at the patch border.
+    GH, GW = siftextractor.gen_dgauss(siftextractor.sigma)
+    IH = signal.convolve2d(im_fill, GH, mode='same', boundary='symm')
+    IW = signal.convolve2d(im_fill, GW, mode='same', boundary='symm')
+    Imag = np.sqrt(IH**2+IW**2)[mask_rs]
+    Itheta = np.arctan2(IH, IW)[mask_rs]
+    Iorient = np.array([Imag * np.maximum(np.cos(Itheta - a), 0)**siftextractor.alpha for a in siftextractor.angles]) # (n_angles, n_mask_pixels)
+
+    # shape-adapted spatial cells: equal-area depth rings x equal-angle sectors.
+    depth = ndimage.distance_transform_edt(mask_rs)[mask_rs]
+    ring = np.digitize(depth, np.quantile(depth, np.linspace(0, 1, n_rings+1)[1:-1]))
+    yy, xx = np.nonzero(mask_rs)
+    angle = np.arctan2(yy - yy.mean(), xx - xx.mean())
+    sector = np.floor((angle + np.pi) / (2*np.pi) * n_sectors).astype(np.int64) % n_sectors
+    cell = ring * n_sectors + sector
+
+    counts = np.bincount(cell, minlength=n_cells).astype(np.float64)
+    sift_texture = np.array([np.bincount(cell, weights=o, minlength=n_cells) for o in Iorient]) # (n_angles, n_cells)
+    sift_texture = sift_texture / np.maximum(counts, 1)[None,:] # mean pooling, empty cells stay 0.
+    sift_texture = sift_texture.ravel()
+
+    # a flat interior has only floating point gradient noise, which normalisation would amplify to unit length.
+    if Imag.max() <= 1e-6 * (np.abs(im_fill[mask_rs]).max() + 1e-12):
+        return np.zeros_like(sift_texture)
+
+    # Lowe normalisation: unit length -> clip large gradients -> unit length.
+    sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
+    sift_texture = np.minimum(sift_texture, siftextractor.sift_thres)
+    sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
+
+    return sift_texture
+
+
+def _masked_haralick(im, mask, distance):
+    """ Compute the 13 Haralick features from a gray-level co-occurrence matrix built only from pixel pairs where both pixels lie within the binary mask.
+
+    Parameters
+    ----------
+    im : (n_rows, n_cols) integer image
+        cropped image patch
+    mask : (n_rows, n_cols) binary image
+        binary shape mask of the same size as im
+    distance : int
+        co-occurrence distance in pixels. If the mask is too thin to have pixel pairs at this distance, the distance is halved until it does.
+
+    Returns
+    -------
+    feats : (13,) array
+        mean Haralick features over the 4 directions. NaN if no valid pixel pairs exist within the mask even at distance 1.
+    """
+    import mahotas as mh
+
+    # shift gray levels up by 1 so 0 is reserved for outside-mask pixels and ignored by mahotas.
+    im_q = im.astype(np.int32) + 1
+    im_q[mask==0] = 0
+
+    distance = int(distance)
+    while distance >= 1:
+        try:
+            feats = mh.features.haralick(im_q,
+                                         ignore_zeros=True,
+                                         preserve_haralick_bug=False,
+                                         compute_14th_feature=False,
+                                         return_mean=True,
+                                         return_mean_ptp=False,
+                                         use_x_minus_y_variance=False,
+                                         distance=distance)
+            feats = np.asarray(feats, dtype=np.float64)
+            feats[5] = feats[5] - 2 # undo the +1 gray-level shift in sum_average (sum of two gray levels).
+            return feats
+        except ValueError:
+            # mahotas raises if a direction has an empty co-occurrence matrix i.e. the mask is too thin for this distance.
+            distance = distance // 2
+
+    return np.full(13, np.nan)
 
 
 ##### functions for creating a custom gridding scheme given the boundary masks. 
@@ -1443,7 +1591,12 @@ def compute_boundary_texture_features(vid, boundaries,
                             siftshape=(64,64),
                             compute_haralick=True,
                             haralick_distance=15,
-                            timesample=None):
+                            timesample=None,
+                            use_mask=False,
+                            masked_sift_resize='cap',
+                            masks=None,
+                            masked_haralick_levels=8,
+                            masked_haralick_range=None):
 
     """ Compute the Appearance (or texture) features for given tracked organoid contour boundaries
 
@@ -1475,7 +1628,17 @@ def compute_boundary_texture_features(vid, boundaries,
         The maximum distance in pixels to consider while computing the gray-level cooccurence matrix from which the Haralick features are derived from. 
     timesample : None or int
         if specified, compute the feature every timesample # of frames. This can be done when in successive frames, the variation does not vary a lot and one wishes to speed up computation or save on memory
-    
+    use_mask : bool
+        if False (default, original SAM behaviour), Haralick and SIFT are computed on the full bounding box crop, so the background and the object outline contribute and these features partially encode shape. If True, Haralick uses only co-occurring pixel pairs inside the shape mask and SIFT uses only gradients inside the shape mask (with the boundary step edge removed), mean-pooled over shape-adapted ring x sector cells instead of a fixed square grid (see _masked_sift_descriptor), so the features describe internal appearance only. Intensity and regional intensity features are always masked.
+    masked_sift_resize : 'cap', 'square' or 'native'
+        only used if use_mask=True. How the masked patch is rescaled before SIFT. 'cap' (default): downscale preserving aspect ratio so the longest axis is at most max(siftshape). 'square': resize to siftshape as the unmasked SIFT. 'native': no rescaling.
+    masks : None or (n_frames, n_rows, n_cols) binary array
+        only used if use_mask=True. Optional foreground segmentation masks intersected with the contour mask, for when the boundary contour is coarser than the object and would include background pixels.
+    masked_haralick_levels : None or int
+        only used if use_mask=True. Number of grey levels the image is quantised to (over masked_haralick_range, or [0,255] if use_gradient_vid) before the masked Haralick features. Entropy-like Haralick statistics of a many-level co-occurrence matrix are biased by the number of pixel pairs, i.e. by object size, which leaks shape; a few levels largely removes this. None uses the raw grey levels.
+    masked_haralick_range : None or (min, max)
+        intensity range quantised into masked_haralick_levels. If None, the full range of the integer dtype of vid (e.g. [0,255] for uint8), or the min/max of vid for float images (which then depends on pixels outside the objects). For integer images using a small part of their dtype range (e.g. 12-bit data in uint16), pass the actual range.
+
     Returns
     -------
     out_array : (n_organoids, n_frames, n_features) array
@@ -1503,6 +1666,15 @@ def compute_boundary_texture_features(vid, boundaries,
 
     if timesample is None:
         timesample = 1
+
+    if use_mask and masked_haralick_levels is not None:
+        # fixed range for the Haralick grey-level quantisation, independent of the pixels outside the objects.
+        if masked_haralick_range is not None:
+            vid_min, vid_max = masked_haralick_range
+        elif np.issubdtype(np.asarray(vid).dtype, np.integer):
+            vid_min, vid_max = np.iinfo(np.asarray(vid).dtype).min, np.iinfo(np.asarray(vid).dtype).max
+        else:
+            vid_min, vid_max = float(np.nanmin(vid)), float(np.nanmax(vid))
 
 #    print(scale_factor)
     for b_ii in tqdm(range(len(boundaries))):
@@ -1535,6 +1707,12 @@ def compute_boundary_texture_features(vid, boundaries,
                     boundary_ii_descriptors.append([np.nan]) # don't compute
                 else:
                     cnt_binary = sktform.resize(cnt_binary, output_shape=vid_cnt.shape, order=0, preserve_range=True) > 0
+
+                    fg_frame = None
+                    if use_mask and masks is not None:
+                        # restrict to the foreground segmentation, in case the contour is coarser than the object.
+                        fg_frame = np.asarray(masks[tt]) > 0
+                        cnt_binary = np.logical_and(cnt_binary, fg_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1])
 
     #                print(vid_cnt.shape)
     #                if vid_cnt.shape[0]>haralick_distance and vid_cnt.shape[1] > haralick_distance:
@@ -1584,6 +1762,8 @@ def compute_boundary_texture_features(vid, boundaries,
 
                         for reg in uniq_regions:
                             reg_mask = boundary_grid==reg
+                            if fg_frame is not None:
+                                reg_mask = np.logical_and(reg_mask, fg_frame)
 
                             contour_img_feats.append(np.nanmean(vid_frame[reg_mask>0]))
                             contour_img_feats.append(np.nanstd(vid_frame[reg_mask>0]))
@@ -1601,14 +1781,24 @@ def compute_boundary_texture_features(vid, boundaries,
                     if compute_all_feats==True or (compute_all_feats==False and compute_haralick==True):
 
                         # this is absolutely not normalised .....
-                        cnt_texture = mh.features.haralick(vid_cnt,
-                                                           ignore_zeros=False,
-                                                           preserve_haralick_bug=False,
-                                                           compute_14th_feature=False,
-                                                           return_mean=True, # mean of the different directions.
-                                                           return_mean_ptp=False,
-                                                           use_x_minus_y_variance=False,
-                                                           distance=np.minimum(max_dist, haralick_distance)) # i see the distance is the limiting factor.
+                        if use_mask:
+                            vid_cnt_q = vid_cnt
+                            if masked_haralick_levels is not None:
+                                # quantise over a fixed intensity range so the levels mean the same for every object.
+                                vmin, vmax = (0., 255.) if use_gradient_vid else (vid_min, vid_max)
+                                vid_cnt_q = np.clip(np.floor((vid_cnt.astype(np.float64) - vmin) / (vmax - vmin + 1e-8) * masked_haralick_levels),
+                                                    0, masked_haralick_levels-1).astype(np.int32)
+                            cnt_texture = _masked_haralick(vid_cnt_q, cnt_binary,
+                                                           distance=np.minimum(max_dist, haralick_distance))
+                        else:
+                            cnt_texture = mh.features.haralick(vid_cnt,
+                                                               ignore_zeros=False,
+                                                               preserve_haralick_bug=False,
+                                                               compute_14th_feature=False,
+                                                               return_mean=True, # mean of the different directions.
+                                                               return_mean_ptp=False,
+                                                               use_x_minus_y_variance=False,
+                                                               distance=np.minimum(max_dist, haralick_distance)) # i see the distance is the limiting factor.
 
     #                    cnt_texture = cnt_texture/(np.linalg.norm(cnt_texture) + 1e-8)
                         cnt_texture_labels = np.hstack(['angular_second_moment',
@@ -1631,11 +1821,14 @@ def compute_boundary_texture_features(vid, boundaries,
 
                     if compute_all_feats==True or (compute_all_feats==False and compute_sift==True):
 
-                        siftextractor = SingleSiftExtractor(siftshape[0]) # note this is already in the above.
+                        if use_mask:
+                            sift_texture = _masked_sift_descriptor(vid_cnt, cnt_binary, resize=masked_sift_resize, siftshape=siftshape)
+                        else:
+                            siftextractor = SingleSiftExtractor(siftshape[0]) # note this is already in the above.
 
-                        vid_cnt_im = sktform.resize(vid_cnt, siftshape, preserve_range=True)
-                        sift_texture = siftextractor.process_image(vid_cnt_im).ravel()
-                        sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
+                            vid_cnt_im = sktform.resize(vid_cnt, siftshape, preserve_range=True)
+                            sift_texture = siftextractor.process_image(vid_cnt_im).ravel()
+                            sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
                         sift_texture_labels = np.hstack(['sift_appear_%s'%(str(iii+1)) for iii in np.arange(len(sift_texture))]) # using sift_appear to distinguish from motion 
 
                         all_feats.append(sift_texture)
@@ -1802,7 +1995,10 @@ def compute_boundary_motion_features(vid_flow,
                                      time_res=1.,
                                      compute_sift_feats=True,
                                      siftshape=(64,64),
-                                     timesample=None):
+                                     timesample=None,
+                                     use_mask=False,
+                                     masked_sift_resize='cap',
+                                     masks=None):
     """ Compute the Motion features for given tracked organoid contour boundaries. Can only computed for a video as opposed to shape and appearance. 
 
     Parameters
@@ -1837,7 +2033,13 @@ def compute_boundary_motion_features(vid_flow,
         size of the image patch for computing SIFT. The cropped bounding box patch will be rescaled to this size to extract the global SIFT descriptor for the image
     timesample : None or int
         if specified, compute the feature every timesample # of frames. This can be done when in successive frames, the variation does not vary a lot and one wishes to speed up computation or save on memory
-    
+    use_mask : bool
+        if False (default, original SAM behaviour), the speed, curl and divergence SIFT descriptors are computed on the bounding box crop with the pixels *inside* the shape set to 0, so they mainly encode the background flow and the object outline i.e. shape. If True, curl and divergence are recomputed from the flow inside the shape mask only (so the flow discontinuity at the boundary does not leak in) and the SIFT descriptors use only gradients of pixels inside the shape mask (with the boundary step edge removed), mean-pooled over shape-adapted ring x sector cells instead of a fixed square grid (see _masked_sift_descriptor), so they describe internal motion only. Global and regional speed statistics are always masked.
+    masked_sift_resize : 'cap', 'square' or 'native'
+        only used if use_mask=True. How the masked patch is rescaled before SIFT. 'cap' (default): downscale preserving aspect ratio so the longest axis is at most max(siftshape). 'square': resize to siftshape as the unmasked SIFT. 'native': no rescaling.
+    masks : None or (n_frames, n_rows, n_cols) binary array
+        only used if use_mask=True. Optional foreground segmentation masks intersected with the contour mask, for when the boundary contour is coarser than the object and would include background pixels.
+
     Returns
     -------
     out_array : (n_organoids, n_frames, n_features) array
@@ -1917,6 +2119,18 @@ def compute_boundary_motion_features(vid_flow,
 
                         cnt_binary = cnt_binary = sktform.resize(cnt_binary, output_shape=flow_vid_cnt.shape[:-1], order=0, preserve_range=True) > 0
 
+                        fg_frame = None
+                        if use_mask and masks is not None:
+                            # restrict to the foreground segmentation, in case the contour is coarser than the object.
+                            fg_frame = np.asarray(masks[tt]) > 0
+                            cnt_binary = np.logical_and(cnt_binary, fg_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1])
+
+                        if use_mask:
+                            # recompute curl and divergence from the flow inside the mask only (outside filled by nearest neighbour), so the flow discontinuity at the object boundary does not leak in.
+                            flow_vid_cnt_fill = np.dstack([_fill_outside_mask_nearest(flow_vid_cnt[...,ch], cnt_binary) for ch in range(flow_vid_cnt.shape[-1])])
+                            curl_vid_cnt = _curl_vector_flow(flow_vid_cnt_fill)[...,-1] / float(time_res)
+                            div_vid_cnt = _div_vector_flow(flow_vid_cnt_fill) / float(time_res)
+
                         """
                         first get the central displacement between current and next timepoint.
                         """
@@ -1993,6 +2207,8 @@ def compute_boundary_motion_features(vid_flow,
 
                             for reg in uniq_regions:
                                 reg_mask = boundary_grid==reg
+                                if fg_frame is not None:
+                                    reg_mask = np.logical_and(reg_mask, fg_frame)
 
                                 flow_reg_mask = flow_frame[reg_mask>0] * pixel_res / float(time_res)
 
@@ -2007,7 +2223,10 @@ def compute_boundary_motion_features(vid_flow,
     #                                print(flow_reg_mask_mag)
 
     #                                print(flow_reg_mask_mag)
-                                    if np.sum(flow_reg_mask_mag>1e-3) > 0:
+                                    if np.sum(flow_reg_mask_mag>1e-3) > 0 and np.nanstd(flow_reg_mask_mag) < 1e-8:
+                                        # constant nonzero speed: gaussian_kde is singular. As std->0 the bins collapse within one kernel bandwidth so the normalised kde tends to uniform.
+                                        hist_flow = np.ones(n_contour_feat_bins) / float(n_contour_feat_bins)
+                                    elif np.sum(flow_reg_mask_mag>1e-3) > 0:
                                         hist_flow = _kde_scipy(flow_reg_mask_mag, x_grid, bandwidth=.2) # direct gaussian kde estimation.
                                         hist_flow = hist_flow / float(np.sum(hist_flow) + 1e-8) # normalisation ( we only care for the shape)
                                     else:
@@ -2034,14 +2253,18 @@ def compute_boundary_motion_features(vid_flow,
 
                             flow_vid_cnt_ = flow_vid_cnt * pixel_res / float(time_res)
                             flow_vid_cnt_ = np.linalg.norm(flow_vid_cnt_, axis=-1) # create the magnitude of the flow.
-                            flow_vid_cnt_[cnt_binary>0] = 0 # mask to be specific to within the boundary.
 
-                            # create the sift extractor for this pseudo image.
-                            siftextractor = SingleSiftExtractor(siftshape[0]) # note this is already in the above.
+                            if use_mask:
+                                sift_texture = _masked_sift_descriptor(flow_vid_cnt_, cnt_binary, resize=masked_sift_resize, siftshape=siftshape)
+                            else:
+                                flow_vid_cnt_[cnt_binary>0] = 0 # mask to be specific to within the boundary.
 
-                            flow_vid_cnt_im = sktform.resize(flow_vid_cnt_, siftshape, preserve_range=True)
-                            sift_texture = siftextractor.process_image(flow_vid_cnt_im).ravel()
-                            sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
+                                # create the sift extractor for this pseudo image.
+                                siftextractor = SingleSiftExtractor(siftshape[0]) # note this is already in the above.
+
+                                flow_vid_cnt_im = sktform.resize(flow_vid_cnt_, siftshape, preserve_range=True)
+                                sift_texture = siftextractor.process_image(flow_vid_cnt_im).ravel()
+                                sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
                             sift_texture_labels = np.hstack(['sift_motion_%s'%(str(iii+1)) for iii in np.arange(len(sift_texture))])
 
                             all_feats.append(sift_texture)
@@ -2055,14 +2278,17 @@ def compute_boundary_motion_features(vid_flow,
 #                            curl_vid_cnt = curl_vid_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy() # somewhat noisy but looks ok?
 #                            div_vid_cnt = div_vid_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy() # somewhat noisy but looks ok?
 #
-                            # create the sift extractor for this pseudo image.
-                            siftextractor = SingleSiftExtractor(siftshape[0]) # note this is already in the above.
+                            if use_mask:
+                                sift_texture = _masked_sift_descriptor(curl_vid_cnt, cnt_binary, resize=masked_sift_resize, siftshape=siftshape)
+                            else:
+                                # create the sift extractor for this pseudo image.
+                                siftextractor = SingleSiftExtractor(siftshape[0]) # note this is already in the above.
 
-                            curl_vid_cnt_ = curl_vid_cnt.copy();
-                            curl_vid_cnt_[cnt_binary>0] = 0
-                            curl_vid_cnt_im = sktform.resize(curl_vid_cnt_, siftshape, preserve_range=True)
-                            sift_texture = siftextractor.process_image(curl_vid_cnt_im).ravel()
-                            sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
+                                curl_vid_cnt_ = curl_vid_cnt.copy();
+                                curl_vid_cnt_[cnt_binary>0] = 0
+                                curl_vid_cnt_im = sktform.resize(curl_vid_cnt_, siftshape, preserve_range=True)
+                                sift_texture = siftextractor.process_image(curl_vid_cnt_im).ravel()
+                                sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
                             sift_texture_labels = np.hstack(['curl_sift_%s'%(str(iii+1)) for iii in np.arange(len(sift_texture))])
 
                             all_feats.append(sift_texture)
@@ -2070,14 +2296,17 @@ def compute_boundary_motion_features(vid_flow,
                             all_feats_norm_bool.append(np.hstack([True]*len(sift_texture)))
 
 
-                            # create the sift extractor for this pseudo image.
-                            siftextractor = SingleSiftExtractor(siftshape[0]) # note this is already in the above.
+                            if use_mask:
+                                sift_texture = _masked_sift_descriptor(div_vid_cnt, cnt_binary, resize=masked_sift_resize, siftshape=siftshape)
+                            else:
+                                # create the sift extractor for this pseudo image.
+                                siftextractor = SingleSiftExtractor(siftshape[0]) # note this is already in the above.
 
-                            div_vid_cnt_ = div_vid_cnt.copy();
-                            div_vid_cnt_[cnt_binary>0] = 0
-                            div_vid_cnt_im = sktform.resize(div_vid_cnt_, siftshape, preserve_range=True)
-                            sift_texture = siftextractor.process_image(div_vid_cnt_im).ravel()
-                            sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
+                                div_vid_cnt_ = div_vid_cnt.copy();
+                                div_vid_cnt_[cnt_binary>0] = 0
+                                div_vid_cnt_im = sktform.resize(div_vid_cnt_, siftshape, preserve_range=True)
+                                sift_texture = siftextractor.process_image(div_vid_cnt_im).ravel()
+                                sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
                             sift_texture_labels = np.hstack(['div_sift_%s'%(str(iii+1)) for iii in np.arange(len(sift_texture))])
 
                             all_feats.append(sift_texture)
