@@ -29,7 +29,8 @@
 [![GitHub forks](https://img.shields.io/github/forks/fyz11/SPOT?style=social)](https://github.com/fyz11/SPOT/)
 
 #### Oct 2026
-- Python 3.9 - 3.13 and NumPy 2 supported. TensorFlow is no longer a core dependency (`pip install SAM-SPOT[detection]` for the PyTorch detection / segmentation networks).
+- Python 3.9 - 3.13 and NumPy 2 supported. PyTorch is installed by default and runs the detection / segmentation networks and the GPU feature functions; TensorFlow is only needed for the original Keras functions (`pip install SAM-SPOT[keras-legacy]`).
+- UMAP (`umap-learn`) and PaCMAP (`pacmap`) are both installed for embedding the SAM phenome.
 - Faster SAM phenome extraction: the shape, appearance and motion functions now run an optimised implementation by default (`fast=True`, parallel over objects / frames with `n_jobs`), and `*_torch` GPU variants are available, with the same outputs. See [Faster extraction](#faster-extraction).
 - **New default:** the appearance and motion features are masked (`use_mask=True`): they describe only the object interior and do not leak shape. Use `use_mask=False` for the original SAM features.
 - Recommended for analysis: equal weighting of the SAM feature sets and feature families for embeddings and clustering: `SPOT.Analysis.preprocessing.weight_sam_features(feats, names, group_weighting=True, set_weighting=True)` gives shape, appearance and motion the same total variance and, within each, every feature family (e.g. curvature vs shape context, Haralick vs SIFT, speed vs curl SIFT) the same weight.
@@ -114,7 +115,7 @@ metrics, metrics_labels, metrics_norm_bool = SPOT_SAM_features.compute_boundary_
 #### Faster extraction
 By default `compute_boundary_*_features` run the optimised CPU implementation (`fast=True`; `fast=False` runs the original implementation) and accept `n_jobs` to process objects / frames in parallel. The implementations are also available directly:
 - `compute_boundary_*_features_fast(..., n_jobs=1)`: optimised CPU implementation (bounding box instead of full-frame rasterisation, curl/divergence once per frame, vectorised Euler characteristic transform and shape context), parallel over objects with `n_jobs` (-1 = all CPUs). Identical outputs for `n_jobs=1`; in parallel the BLAS-based Haralick statistics can differ in floating point round-off.
-- `SPOT.Features.features_torch.compute_boundary_*_features_torch(..., device='cuda')`: GPU implementation (requires PyTorch, `pip install SAM-SPOT[gpu]`). Polygon rasterisation, Haralick features, SIFT descriptors, the Euler characteristic transform and curl/divergence are batched on the GPU; the remaining steps run on the CPU. Outputs match the original functions up to float64 round-off.
+- `SPOT.Features.features_torch.compute_boundary_*_features_torch(..., device='cuda')`: GPU implementation (PyTorch; needs a CUDA build of torch, see [To install](#to-install)). Polygon rasterisation, Haralick features, SIFT descriptors, the Euler characteristic transform and curl/divergence are batched on the GPU; the remaining steps run on the CPU. Outputs match the original functions up to float64 round-off.
 ```
 import SPOT.Features.features as SPOT_SAM_features
 import SPOT.Features.features_torch as SPOT_SAM_features_torch
@@ -237,7 +238,7 @@ make html
 
 <!-- TOC --><a name="to-install"></a>
 ## To install
-The package can be installed automatically using pip after cloning the repository. It has been tested and working for Python 3.9 - 3.13 (NumPy 1.x and 2.x). Installation time in mins. We recommend installing into a new conda environment, and preinstalling the annoy package from conda-forge if you want to use pacmap instead of umap for dimensionality reduction. Optional extras: `gpu` (PyTorch, for the `*_torch` feature functions), `detection` (PyTorch detection / segmentation networks), `analysis` (umap-learn, statsmodels, fastcluster), `keras-legacy` (TensorFlow, for the original Keras networks), `test` (pytest), e.g. `pip install .[gpu,detection]`:
+The package can be installed automatically using pip after cloning the repository. It has been tested and working for Python 3.9 - 3.13 (NumPy 1.x and 2.x). Installation time in mins. We recommend installing into a new conda environment and preinstalling the annoy package (needed by pacmap) from conda-forge, since pip has to compile it on some platforms (e.g. Windows). PyTorch is a core dependency: pip installs the CPU build on Windows by default, so for the GPU feature functions / networks install a CUDA build of torch (>= 2.2) from [pytorch.org](https://pytorch.org/get-started/locally/) first, which `pip install` then keeps. Optional extras: `keras-legacy` (TensorFlow, for the original Keras networks), `test` (pytest), `docs`:
 ```shell
 conda create -n SAM-SPOT_env python=3.12
 conda install -n SAM-SPOT_env -c conda-forge python-annoy

@@ -33,8 +33,8 @@ classifiers = [
 ]
 
 
-# TensorFlow is no longer a core dependency (the detection / segmentation networks have PyTorch versions; the original
-# Keras functions need the keras-legacy extra), which allows Python 3.9 - 3.13 and NumPy 2.
+# TensorFlow is no longer a core dependency (the detection / segmentation networks have PyTorch versions, installed by
+# default; the original Keras functions need the keras-legacy extra), which allows Python 3.9 - 3.13 and NumPy 2.
 requires-python = ">=3.9, <3.14"
 dependencies = [
     'numpy>=1.23',
@@ -55,14 +55,16 @@ dependencies = [
     'joblib',
     'numexpr',
     'imagecodecs',
-    'dtaidistance'
+    'dtaidistance',
+    'umap-learn',
+    'pacmap',
+    'statsmodels',
+    'fastcluster',
+    'torch>=2.2',
+    'h5py'
     ]
 
 [project.optional-dependencies]
-pacmap = ["pacmap"]
-analysis = ["umap-learn", "statsmodels", "fastcluster"]
-gpu = ["torch>=2.2"]
-detection = ["torch>=2.2", "h5py"]
 keras-legacy = ["tensorflow"]
 test = ["pytest"]
 docs = ["sphinx", "numpydoc", "sphinx_rtd_theme"]
