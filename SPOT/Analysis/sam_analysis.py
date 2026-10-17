@@ -696,6 +696,8 @@ def get_SAM_feature_type(feature_names):
             feature_SAM_type[name_ii] = 2
         if 'curl' in name:
             feature_SAM_type[name_ii] = 2
+        if 'shear' in name: # shear of the flow (e.g. shear_sift, mean_shear_global_flow) is motion
+            feature_SAM_type[name_ii] = 2
         if 'hist_bin' in name and 'region_' in name:
             feature_SAM_type[name_ii] = 2 # change this for now. # intensity is not called this? 
         

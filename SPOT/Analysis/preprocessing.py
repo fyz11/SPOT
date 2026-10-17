@@ -443,6 +443,7 @@ SAM_FEATURE_GROUPS = [
     ('motion', 'speed SIFT', lambda n: n.startswith('sift_motion_')),
     ('motion', 'curl SIFT', lambda n: n.startswith('curl_sift_')),
     ('motion', 'divergence SIFT', lambda n: n.startswith('div_sift_')),
+    ('motion', 'shear SIFT', lambda n: n.startswith('shear_sift_')),  # pip SAM-SPOT 0.1.1
 ]
 
 

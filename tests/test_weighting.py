@@ -70,6 +70,17 @@ def test_sets_agree_with_get_SAM_feature_type(sam_names):
     assert list(sets) == list(np.array(['shape', 'appearance', 'motion'])[sam_type])
 
 
+
+def test_shear_is_motion():
+    """ the flow shear features of pip SAM-SPOT 0.1.1 are motion (they were classed as shape) """
+    from SPOT.Analysis.sam_analysis import get_SAM_feature_type
+    names = np.array(['shear_sift_0', 'shear_sift_127', 'mean_shear_global_flow', 'stddev_shear_global_flow'])
+    sam_type, _ = get_SAM_feature_type(names)
+    assert list(sam_type) == [2, 2, 2, 2]
+    sets, groups = pp.sam_feature_groups(names)
+    assert list(sets) == ['motion'] * 4
+    assert list(groups[:2]) == ['shear SIFT'] * 2
+
 def test_legacy_export_names_with_feature_sets():
     """ older exports (data/cell_tracking) name appearance and motion SIFT 'sift_<n>' and have legacy features """
     import os
