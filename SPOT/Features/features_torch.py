@@ -789,6 +789,7 @@ def compute_boundary_motion_features_torch(vid_flow,
                                            use_mask=True,
                                            masked_sift_resize='cap',
                                            masks=None,
+                                           motion_sift_zero_inside=False,
                                            device=None):
     """ PyTorch variant of SPOT.Features.features.compute_boundary_motion_features with the same parameters and outputs.
 
@@ -799,6 +800,11 @@ def compute_boundary_motion_features_torch(vid_flow,
     Parameters
     ----------
     (see compute_boundary_motion_features)
+    motion_sift_zero_inside : bool
+        only used if use_mask=False. The original SAM motion features set the flow magnitude / curl / divergence *inside*
+        the object to 0 before their SIFT descriptors, so the descriptors mostly describe the background and the
+        outline; False (default) sets the pixels *outside* the object to 0 instead, so they describe the object's own
+        motion. True reproduces the original features.
     device : None or str or torch.device
         the torch device. None uses cuda if available, else the CPU.
 
@@ -819,7 +825,8 @@ def compute_boundary_motion_features_torch(vid_flow,
                 compute_contour_feats=compute_contour_feats, n_contour_feat_bins=n_contour_feat_bins,
                 cnt_sigma=cnt_sigma, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start,
                 pixel_res=pixel_res, time_res=time_res, compute_sift_feats=compute_sift_feats, siftshape=siftshape,
-                use_mask=use_mask, masked_sift_resize=masked_sift_resize)
+                use_mask=use_mask, masked_sift_resize=masked_sift_resize,
+                motion_sift_zero_inside=motion_sift_zero_inside)
     samples = _valid_samples(boundaries, frames, need_next=True)
     contours = [boundaries[b][tt] for b, jj, tt in samples]
     fg = lambda tt: (np.asarray(masks[tt]) > 0) if (use_mask and masks is not None) else None

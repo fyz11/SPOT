@@ -96,3 +96,21 @@ def test_defaults_are_fast_and_masked(case_data):
     a = run_quiet(sf.compute_boundary_texture_features, vid=d['vid'], boundaries=d['boundaries'])[0]
     b = run_quiet(sf.compute_boundary_texture_features, vid=d['vid'], boundaries=d['boundaries'], fast=False, use_mask=True)[0]
     assert np.array_equal(np.asarray(a, np.float64), np.asarray(b, np.float64), equal_nan=True)
+
+
+def test_unmasked_motion_sift_ignores_background_flow():
+    """ unmasked motion SIFT: by default the flow outside the object is set to 0 (the original zeroed the inside), so the
+    speed SIFT does not change when only the background flow changes """
+    d = fixtures.load('synthetic')
+    flow2 = d['flow'].copy()
+    outside = ~d['masks'][:-1]
+    flow2[outside] = np.random.default_rng(0).normal(size=(outside.sum(), 2)) * 5
+    kw = dict(boundaries=d['boundaries'], use_mask=False)
+    names = None
+    res = {}
+    for inside in (False, True):
+        a, names, _ = run_quiet(sf.compute_boundary_motion_features, vid_flow=d['flow'], motion_sift_zero_inside=inside, **kw)
+        b, _, _ = run_quiet(sf.compute_boundary_motion_features, vid_flow=flow2, motion_sift_zero_inside=inside, **kw)
+        cols = np.char.startswith(np.asarray(names).astype(str), 'sift_motion')
+        res[inside] = np.nanmax(np.abs(np.asarray(a)[..., cols] - np.asarray(b)[..., cols]))
+    assert res[False] < 1e-12 and res[True] > 1e-3
