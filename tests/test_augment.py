@@ -51,7 +51,8 @@ def test_interpolated_rotation_matches_rotated_contour(data):
 def test_invariant_features_identical_at_quarter_turns(data):
     feats, labels, norm, (per_angle, angles) = run_quiet(
         ag.compute_rotation_averaged_features, feature_fn=sf.compute_boundary_texture_features_fast,
-        boundaries=data['boundaries'], vid=data['vid'], n_rotations=4, return_per_angle=True, verbose=False)
+        boundaries=data['boundaries'], vid=data['vid'], n_rotations=4, return_per_angle=True, verbose=False,
+        collapse_sift=False)
     assert list(angles) == [0., 90., 180., 270.]
     assert per_angle.shape[:1] == (4,) and feats.shape == per_angle.shape[1:]
     labels = list(labels)
@@ -153,12 +154,12 @@ def test_sift_quarter_turn_permutation(masked):
     assert np.bincount(orbit).tolist() == [4] * 32
 
 
-def test_collapse_sift_is_opt_in_and_invariant(data):
+def test_collapse_sift_default_and_invariant(data):
     kw = dict(feature_fn=sf.compute_boundary_texture_features_fast, boundaries=data['boundaries'], vid=data['vid'],
               n_rotations=4, return_per_angle=True, verbose=False)
-    feats, labels, norm, (per_angle, _) = run_quiet(ag.compute_rotation_averaged_features, **kw)
-    assert sum(l.startswith('sift_appear_') for l in labels) == 128  # default: all bins kept
-    feats_c, labels_c, norm_c, (per_angle_c, _) = run_quiet(ag.compute_rotation_averaged_features, collapse_sift=True, **kw)
+    feats, labels, norm, (per_angle, _) = run_quiet(ag.compute_rotation_averaged_features, collapse_sift=False, **kw)
+    assert sum(l.startswith('sift_appear_') for l in labels) == 128  # collapse_sift=False: all bins kept
+    feats_c, labels_c, norm_c, (per_angle_c, _) = run_quiet(ag.compute_rotation_averaged_features, **kw)  # default
     sift = [l for l in labels_c if l.startswith('sift_appear_')]
     assert len(sift) == 32 and all('orbit' in l for l in sift)
     assert len(labels_c) == len(labels) - 96 == feats_c.shape[-1] == per_angle_c.shape[-1] == len(norm_c)
@@ -173,5 +174,5 @@ def test_collapse_sift_is_opt_in_and_invariant(data):
     assert sens.loc[sift, 'sensitivity'].median() < 0.5 * sens_all.loc[[l for l in lab if l.startswith('sift_appear_')], 'sensitivity'].median()
     # not collapsed if the angles are not closed under quarter turns
     out = run_quiet(ag.compute_rotation_averaged_features, feature_fn=sf.compute_boundary_texture_features_fast,
-                    boundaries=data['boundaries'], vid=data['vid'], angles=[0, 90], collapse_sift=True, verbose=False)
+                    boundaries=data['boundaries'], vid=data['vid'], angles=[0, 90], verbose=False)
     assert sum(l.startswith('sift_appear_') for l in out[1]) == 128

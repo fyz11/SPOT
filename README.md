@@ -34,7 +34,7 @@
 - **New default:** the appearance and motion features are masked (`use_mask=True`): they describe only the object interior and do not leak shape. Use `use_mask=False` for the original SAM features.
 - Recommended for analysis: equal weighting of the SAM feature sets and feature families for embeddings and clustering: `SPOT.Analysis.preprocessing.weight_sam_features(feats, names, group_weighting=True, set_weighting=True)` gives shape, appearance and motion the same total variance and, within each, every feature family (e.g. curvature vs shape context, Haralick vs SIFT, speed vs curl SIFT) the same weight.
 - Optional, depending on the experimental design: regressing out confounders such as size, intensity or batch (`regress_out_confounders`), and rotation-averaged features (`SPOT.Features.augment`).
-  To enforce rotation invariance, `compute_rotation_averaged_features(..., collapse_sift=True)` also replaces the SIFT bins that the averaging makes equivalent (the 4 bins of each quarter-turn orbit) by one feature per orbit, 32 instead of 128 per descriptor. The default keeps all bins.
+  To enforce rotation invariance, `compute_rotation_averaged_features` also replaces the SIFT bins that the averaging makes equivalent (the 4 bins of each quarter-turn orbit) by one feature per orbit, 32 instead of 128 per descriptor (`collapse_sift=True`, default; `False` keeps all bins).
 - **New default:** multi-scale selection of the number of SAM modules (`hierarchical_cluster_features_into_SAM_modules(..., module_selection='multiscale')`). See [SAM module selection](#sam-module-selection).
 
 #### Aug 2026

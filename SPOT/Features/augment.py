@@ -263,16 +263,16 @@ def collapse_sift_orbits(feats, labels, norm_bool=None, use_mask=True):
 
 def compute_rotation_averaged_features(feature_fn, boundaries, vid=None, masks=None, imshape=None, n_rotations=4,
                                        angles=None, interp_order=3, flow_params=None, rescale_intensity=True,
-                                       n_jobs=None, return_per_angle=False, verbose=True, collapse_sift=False,
+                                       n_jobs=None, return_per_angle=False, verbose=True, collapse_sift=True,
                                        **feature_kwargs):
     """ Rotation-averaged SAM features: rotate the inputs by n angles, compute the features at each angle with
     feature_fn and average them.
 
     A quarter turn permutes the SIFT descriptor bins (orientations and spatial cells), so after averaging over a set of
     angles closed under +90 degrees (n_rotations divisible by 4) the 4 bins of each quarter-turn orbit carry the same
-    information. When rotation invariance is to be enforced, collapse_sift=True replaces them by one feature per orbit
-    (their mean, named <prefix>orbit<id>; 32 instead of 128 per descriptor), so they are not counted 4 times. The default
-    (False) keeps all the bins.
+    information, so by default (collapse_sift=True, enforcing the rotation invariance this function is for) they are
+    replaced by one feature per orbit (their mean, named <prefix>orbit<id>; 32 instead of 128 per descriptor) and not
+    counted 4 times. collapse_sift=False keeps all the bins.
 
     Parameters
     ----------
@@ -306,9 +306,9 @@ def compute_rotation_averaged_features(feature_fn, boundaries, vid=None, masks=N
     verbose : bool
         print the angle being computed
     collapse_sift : bool
-        False (default): keep all SIFT bins. True (to enforce rotation invariance): replace the SIFT bins by one feature
-        per quarter-turn orbit (collapse_sift_orbits), if the angles are closed under +90 degrees; per_angle
-        (return_per_angle) is collapsed the same way, so it matches the returned labels.
+        True (default): replace the SIFT bins by one feature per quarter-turn orbit (collapse_sift_orbits), if the
+        angles are closed under +90 degrees; per_angle (return_per_angle) is collapsed the same way, so it matches the
+        returned labels. False: keep all SIFT bins.
     feature_kwargs :
         any other arguments of feature_fn (e.g. use_mask=True, pixel_res, device)
 
