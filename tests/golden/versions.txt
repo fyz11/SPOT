@@ -1,0 +1,5 @@
+python 3.9.23
+numpy 1.26.4
+scipy 1.13.1
+skimage 0.24.0
+mahotas 1.4.18
