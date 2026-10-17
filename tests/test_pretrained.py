@@ -19,7 +19,7 @@ SEG_H5 = os.path.join(pretrained.REPO_DIR, 'models', 'segment_CNN_model',
 
 def _serve(monkeypatch, name, source, tmp_path):
     """ point the model at a file:// URL and hide the repository copy """
-    info = dict(pretrained.PRETRAINED_MODELS[name], url=pathlib.Path(source).resolve().as_uri())
+    info = dict(pretrained.PRETRAINED_MODELS[name], url=pathlib.Path(source).resolve().as_uri(), sha256=None)
     monkeypatch.setitem(pretrained.PRETRAINED_MODELS, name, info)
     monkeypatch.setattr(pretrained, 'REPO_DIR', str(tmp_path / 'no_repo'))
 

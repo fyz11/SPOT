@@ -31,7 +31,7 @@ PRETRAINED_MODELS = {
             '?rlkey=6deiqemsmcz3yin9b5dnz0e6y&dl=1',
         filename='keras_YOLOv3_organoid_detector2.h5',
         repo_folder=os.path.join('models', 'detect_CNN_model'),
-        sha256=None),
+        sha256='5780955baa6fe760de4a77fb5aa67c9b69c31378c75b0daab81d1d20f76b98c9'),
     'attn_unet_organoid_segmentation': dict(
         url='https://github.com/fyz11/SPOT/raw/main/models/segment_CNN_model/'
             'organoid-bbox_attn_seg-unet-master-v2_64x64-8feats_v2.h5',

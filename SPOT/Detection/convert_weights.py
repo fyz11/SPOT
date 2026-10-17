@@ -6,7 +6,8 @@ Supported architectures:
 
 - 'att_unet' / 'unet' segmentation U-Nets (SPOT.Detection.unets.att_unet / unet). Depth, features, input channels and
   labels are inferred from the conv kernel shapes.
-- 'yolov3' keras-yolo3 YOLOv3 detector (layers named conv_<idx> / bnorm_<idx>), see SPOT.Detection.yolov3_torch.
+- 'yolov3' YOLOv3 detector, see SPOT.Detection.yolov3_torch: experiencor/keras-yolo3 (layers named conv_<idx> /
+  bnorm_<idx>) or qqwweee/keras-yolo3 (auto-named conv2d_<n> / batch_normalization_<n>, mapped in creation order).
 
 Mapping: Conv2D kernels HWIO -> OIHW, Conv2DTranspose kernels (H, W, out, in) -> (in, out, H, W), BatchNormalization
 gamma/beta/moving_mean/moving_variance -> weight/bias/running_mean/running_var with the Keras epsilon.
@@ -92,8 +93,22 @@ def copy_batchnorm(bn, weights, config=None):
         bn.eps = float(config['epsilon'])
 
 
+def _numbered(layers, prefix):
+    """ the layer names <prefix>_<n> sorted by n (Keras auto-names layers in creation order) """
+    names = [n for n in layers if re.fullmatch(r'%s_\d+' % prefix, n)]
+    return sorted(names, key=lambda n: int(n.rsplit('_', 1)[1]))
+
+
+def _is_qqwweee_yolov3(layers):
+    """ the qqwweee/keras-yolo3 YOLOv3 (auto-named conv2d_<n> / batch_normalization_<n>): 75 convs, 72 with
+    batch normalisation, the 3 output convs with a bias """
+    convs = _numbered(layers, 'conv2d')
+    return (len(convs) == 75 and len(_numbered(layers, 'batch_normalization')) == 72
+            and sum(len(layers[n]) == 2 for n in convs) == 3)
+
+
 def detect_arch(layers):
-    if any(re.fullmatch(r'conv_\d+', name) for name in layers):
+    if any(re.fullmatch(r'conv_\d+', name) for name in layers) or _is_qqwweee_yolov3(layers):
         return 'yolov3'
     kernels = [w[0] for w in layers.values() if w[0].ndim == 4]
     n_conv = len(kernels)
@@ -124,9 +139,35 @@ def convert_unet(layers, arch):
     return model, config
 
 
+def _qqwweee_to_experiencor_names(layers, layer_configs, convs):
+    """ Rename the layers of a qqwweee/keras-yolo3 model to the experiencor 'conv_<idx>' / 'bnorm_<idx>' layout of
+    YOLOv3Torch. Both build the same Darknet-53 + 3 heads with the convs created in the same order, so the k-th
+    conv2d (and the k-th batch_normalization) maps to the k-th conv (with batch normalisation) of YOLOv3Torch; all kernel
+    shapes are checked when copying. """
+    q_convs = _numbered(layers, 'conv2d')
+    q_bns = _numbered(layers, 'batch_normalization')
+    e_convs = sorted(convs)
+    e_bns = [i for i in e_convs if convs[i].bnorm is not None]
+    if len(q_convs) != len(e_convs) or len(q_bns) != len(e_bns):
+        raise ValueError('h5 has %d convs / %d batch norms, YOLOv3Torch %d / %d'
+                         % (len(q_convs), len(q_bns), len(e_convs), len(e_bns)))
+    renamed, configs = {}, {}
+    for q, e in zip(q_convs, e_convs):
+        has_bias = len(layers[q]) == 2
+        if has_bias != (convs[e].bnorm is None):
+            raise ValueError('%s does not match conv_%d (bias / batch normalisation differ)' % (q, e))
+        renamed['conv_%d' % e] = layers[q]
+    for q, e in zip(q_bns, e_bns):
+        renamed['bnorm_%d' % e] = layers[q]
+        configs['bnorm_%d' % e] = layer_configs.get(q, {})
+    return renamed, configs
+
+
 def convert_yolov3(layers, layer_configs):
     from SPOT.Detection.yolov3_torch import YOLOv3Torch
 
+    if not any(re.fullmatch(r'conv_\d+', name) for name in layers):
+        layers, layer_configs = _qqwweee_to_experiencor_names(layers, layer_configs, YOLOv3Torch().conv_layers())
     n_out = layers['conv_81'][0].shape[-1]
     config = {'n_classes': int(n_out // 3 - 5)}
     model = YOLOv3Torch(**config)

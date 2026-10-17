@@ -133,3 +133,6 @@ dmypy.json
 
 # temporary word docs
 ~*.docx
+
+# downloaded pretrained detector weights (too large for git; see SPOT.Detection.pretrained)
+models/detect_CNN_model/
