@@ -33,12 +33,10 @@ if __name__=="__main__":
     fio.mkdir(outfolder)
 
     """
-    Specify the CNN detector weights location here. Our pretrained is available and can be downloaded from dropbox. Follow the link in the README.md to download then copy to models/detect_CNN_model/
+    Specify the CNN detector weights. Our pretrained detector is downloaded from dropbox and converted to PyTorch automatically on first use (cached in ~/.cache/SPOT/models, or $SPOT_MODELS_DIR).
     """
-    # you should download this weights file and place it here. 
-    # weightsfile = r'./models/detect_CNN_model/keras_YOLOv3_organoid_detector2.h5'
-    # the PyTorch weights converted from the .h5 by scripts/convert_keras_weights_to_torch.py
-    weightsfile = r'./models/detect_CNN_model/keras_YOLOv3_organoid_detector2.pt'
+    from SPOT.Detection.pretrained import get_pretrained_weights
+    weightsfile = get_pretrained_weights('yolov3_organoid_detector') # or the path to your own converted .pt
 
     
     """

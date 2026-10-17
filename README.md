@@ -170,7 +170,15 @@ Each example should take around a few mins to run. The longest time is computing
 
 <!-- TOC --><a name="pretrained-neural-network-models-for-organoid-detection-and-segmentation"></a>
 ## Pretrained Neural Network Models for organoid detection and segmentation
-We make available pretrained neural network organoid detection and segmentation models with this repo. The segmentation model is already provided in the repo. The detection model should be downloaded and copied to the models/detect_CNN_model/ folder of this repo if you are running the example scripts.
+We make available pretrained neural network organoid detection and segmentation models with this repo. The segmentation model is already provided in the repo. The detection model is hosted on Dropbox. Both are downloaded (if needed), cached and converted to PyTorch automatically:
+```
+from SPOT.Detection.pretrained import get_pretrained_weights
+
+detector_pt = get_pretrained_weights('yolov3_organoid_detector')             # PyTorch .pt, downloaded + converted on first use
+detector_h5 = get_pretrained_weights('yolov3_organoid_detector', torch=False) # original Keras .h5
+segmenter_pt = get_pretrained_weights('attn_unet_organoid_segmentation')
+```
+Files are cached in `~/.cache/SPOT/models` (or `$SPOT_MODELS_DIR`). The PyTorch loaders (`load_and_run_YOLOv3_weights_torch_detection_model_RGB`, `load_torch_segmentation_model`) use these pretrained models when no weights file is given. Alternatively, download the files manually:
 
 1. Organoid bounding box detector for brightfield/phase contrast and fluorescence microscopy. [Organoid YOLOv3 bounding box detection model weights](https://www.dropbox.com/scl/fi/qzowc9s9n30zh6qdyzeqw/keras_YOLOv3_organoid_detector2.h5?rlkey=6deiqemsmcz3yin9b5dnz0e6y&dl=0)
 2. Organoid attention UNet segmentation model given a bounding box cropped image. (this repo, [models/segment_CNN_model/organoid-bbox_attn_seg-unet-master-v2_64x64-8feats_v2.h5](https://github.com/fyz11/SPOT/blob/main/models/segment_CNN_model/organoid-bbox_attn_seg-unet-master-v2_64x64-8feats_v2.h5)) 

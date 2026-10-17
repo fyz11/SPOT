@@ -510,6 +510,9 @@ def load_and_run_YOLOv3_weights_keras_detection_model_RGB(vid,
     """
     from tensorflow.keras.models import load_model 
     
+    if weightsfile is None:
+        from .pretrained import get_pretrained_weights
+        weightsfile = get_pretrained_weights('yolov3_organoid_detector', torch=False)
     yolo_model = load_model(weightsfile)
     
     return _run_YOLOv3_detection_RGB(vid, 
@@ -565,7 +568,7 @@ def load_and_run_YOLOv3_weights_torch_detection_model_RGB(vid,
                                                           allow_tf32=False):
     """ PyTorch variant of load_and_run_YOLOv3_weights_keras_detection_model_RGB. 
     
-    weightsfile is the .pt produced from the Keras .h5 by scripts/convert_keras_weights_to_torch.py. The network outputs are transposed NCHW -> NHWC so they are decoded with exactly the same _decode_netout, _correct_yolo_boxes and _do_nms as the Keras version. 
+    weightsfile is the .pt produced from the Keras .h5 by SPOT.Detection.convert_weights (scripts/convert_keras_weights_to_torch.py). If None, the pretrained SPOT organoid detector is used, downloaded and converted on first use (SPOT.Detection.pretrained.get_pretrained_weights('yolov3_organoid_detector')). The network outputs are transposed NCHW -> NHWC so they are decoded with exactly the same _decode_netout, _correct_yolo_boxes and _do_nms as the Keras version. 
     
     Parameters
     ----------
@@ -583,6 +586,9 @@ def load_and_run_YOLOv3_weights_torch_detection_model_RGB(vid,
     """
     from .yolov3_torch import load_yolov3_torch
     
+    if weightsfile is None:
+        from .pretrained import get_pretrained_weights
+        weightsfile = get_pretrained_weights('yolov3_organoid_detector', torch=True)
     device = _torch_device(device)
     yolo_model = load_yolov3_torch(weightsfile, device=device)
     
@@ -621,13 +627,13 @@ class TorchSegmentationModel(object):
         return self.predict(x)
 
 
-def load_torch_segmentation_model(weightsfile, device=None, batch_size=256, allow_tf32=False):
+def load_torch_segmentation_model(weightsfile=None, device=None, batch_size=256, allow_tf32=False):
     """ Load the .pt U-Net segmentation model (converted from Keras by scripts/convert_keras_weights_to_torch.py) as a TorchSegmentationModel, a drop-in replacement for the Keras model in SPOT.Tracking.track.segment_organoid_bbox_track. 
     
     Parameters
     ----------
-    weightsfile : str
-        filepath to the .pt weights. 
+    weightsfile : str or None
+        filepath to the .pt weights. If None, the pretrained SPOT organoid segmentation U-Net is used (the repository copy, else downloaded on first use; SPOT.Detection.pretrained.get_pretrained_weights('attn_unet_organoid_segmentation')). 
     device : str, optional
         torch device e.g. 'cuda', 'cpu'. The default uses 'cuda' if available. 
     batch_size : int, optional
@@ -643,4 +649,7 @@ def load_torch_segmentation_model(weightsfile, device=None, batch_size=256, allo
     """
     from .unets import load_unet_torch
     
+    if weightsfile is None:
+        from .pretrained import get_pretrained_weights
+        weightsfile = get_pretrained_weights('attn_unet_organoid_segmentation', torch=True)
     return TorchSegmentationModel(load_unet_torch(weightsfile), device=device, batch_size=batch_size, allow_tf32=allow_tf32)
