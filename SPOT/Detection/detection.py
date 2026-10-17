@@ -321,47 +321,20 @@ def write_bbox_files(filename, detections):
     return []
 
 
-def load_and_run_YOLOv3_weights_keras_detection_model_RGB(vid, 
-                                                          weightsfile,
-                                                          outfolder,  
-                                                          equalize_hist=False,
-                                                          obj_thresh=0.001, 
-                                                          nms_thresh = 0.45,
-                                                          imsize=(512,512),  
-                                                          anchors=None,
-                                                          class_name_file=None,
-                                                          debug_viz=False):
-    """ Master function to predict all bounding boxes for every channel of an input RGB video given the YOLOv3 weights file and the output outfolder path for saving the resultant bounding box predictions. 
+def _run_YOLOv3_detection_RGB(vid, 
+                              predict_fn,
+                              outfolder,  
+                              equalize_hist=False,
+                              obj_thresh=0.001, 
+                              nms_thresh = 0.45,
+                              imsize=(512,512),  
+                              anchors=None,
+                              class_name_file=None,
+                              debug_viz=False):
+    """ Frame-by-frame YOLOv3 bounding box detection shared by the Keras and PyTorch detection runners. 
     
-    Parameters
-    ----------
-    vid : (n_frames, n_rows, n_cols, 3) array 
-        input RGB video.
-    weightsfile : str
-        filepath to the pretrained YOLOv3 weights saved in keras .h5 format. 
-    outfolder : str
-        folderpath to save the bounding box predictions. subfolders will be created in this folder for each of the channels and for each channel there will be an individual .txt file containing the bounding boxes at each timepoint
-    equalize_hist : bool
-        if True, apply global histogram equalization to each frame of the video. 
-    obj_thresh : float [0-1], optional
-        the score threshold for a positive bounding box detection. The default is 0.001.
-    nms_thresh : float [0-1], optional
-        the overlapping IoU threshold for non-maximum bounding box suppression to remove overlapping boxes. The default is 0.45.
-    imsize : (n_rows, n_cols) tuple, optional
-        the input image size to the trained YOLOv3 architecture. The default is (512,512).
-    anchors : list of 3 lists, optional
-        these specify the anchors giving the aspect ratio at each of the 3 scales in YOLOv3 architecture. The default is None.
-    class_name_file : filepath, optional
-        If supplied, it is a file where each line is the name of each object class. Here we have one class - 'organoid'. The default is None.
-    debug_viz : bool, optional
-        If True, draw the bounding box on the video frame for every video frame for checking. The default is False.
-
-    Returns
-    -------
-    None.
-
+    predict_fn maps a (1, n_rows, n_cols, 3) float image in [0,1] to the list of the 3 YOLOv3 output heads, each a (1, grid_h, grid_w, n_anchors*(5+n_classes)) array (Keras channels_last layout). See load_and_run_YOLOv3_weights_keras_detection_model_RGB for the other parameters. 
     """
-    from tensorflow.keras.models import load_model 
     import skimage.transform as sktform 
     import numpy as np 
     import skimage.exposure as skexposure 
@@ -379,7 +352,6 @@ def load_and_run_YOLOv3_weights_keras_detection_model_RGB(vid,
         bbox_class_names = _read_obj_names(class_name_file)
     class_labels = bbox_class_names
 
-    yolo_model = load_model(weightsfile)
     # aug_labels = np.insert(class_labels, len(class_labels), 'Normal')
 
     cmap = sns.color_palette('hls', len(class_labels)+1)
@@ -438,7 +410,7 @@ def load_and_run_YOLOv3_weights_keras_detection_model_RGB(vid,
             # imglist.append(frame_file)
             # frame_img_ = preprocess_input(frame_img, net_h, net_w)
             # print('max intensity in, ', np.max(frame_img))
-            yolos = yolo_model.predict((frame_img/255.)[None,...]) # outputs 3 heads... for the 3 feature maps...  # this needs to be converted to bbox. ! 
+            yolos = predict_fn((frame_img/255.)[None,...]) # outputs 3 heads... for the 3 feature maps...  # this needs to be converted to bbox. ! 
             # yolos = yolo_model.predict(frame_img_)
             boxes = []
 
@@ -494,3 +466,181 @@ def load_and_run_YOLOv3_weights_keras_detection_model_RGB(vid,
             write_bbox_files(outboxfile, detect_bboxes_new)
     
     return []
+
+
+def load_and_run_YOLOv3_weights_keras_detection_model_RGB(vid, 
+                                                          weightsfile,
+                                                          outfolder,  
+                                                          equalize_hist=False,
+                                                          obj_thresh=0.001, 
+                                                          nms_thresh = 0.45,
+                                                          imsize=(512,512),  
+                                                          anchors=None,
+                                                          class_name_file=None,
+                                                          debug_viz=False):
+    """ Master function to predict all bounding boxes for every channel of an input RGB video given the YOLOv3 weights file and the output outfolder path for saving the resultant bounding box predictions. 
+    
+    Parameters
+    ----------
+    vid : (n_frames, n_rows, n_cols, 3) array 
+        input RGB video.
+    weightsfile : str
+        filepath to the pretrained YOLOv3 weights saved in keras .h5 format. 
+    outfolder : str
+        folderpath to save the bounding box predictions. subfolders will be created in this folder for each of the channels and for each channel there will be an individual .txt file containing the bounding boxes at each timepoint
+    equalize_hist : bool
+        if True, apply global histogram equalization to each frame of the video. 
+    obj_thresh : float [0-1], optional
+        the score threshold for a positive bounding box detection. The default is 0.001.
+    nms_thresh : float [0-1], optional
+        the overlapping IoU threshold for non-maximum bounding box suppression to remove overlapping boxes. The default is 0.45.
+    imsize : (n_rows, n_cols) tuple, optional
+        the input image size to the trained YOLOv3 architecture. The default is (512,512).
+    anchors : list of 3 lists, optional
+        these specify the anchors giving the aspect ratio at each of the 3 scales in YOLOv3 architecture. The default is None.
+    class_name_file : filepath, optional
+        If supplied, it is a file where each line is the name of each object class. Here we have one class - 'organoid'. The default is None.
+    debug_viz : bool, optional
+        If True, draw the bounding box on the video frame for every video frame for checking. The default is False.
+
+    Returns
+    -------
+    None.
+
+    """
+    from tensorflow.keras.models import load_model 
+    
+    yolo_model = load_model(weightsfile)
+    
+    return _run_YOLOv3_detection_RGB(vid, 
+                                     yolo_model.predict, # outputs 3 heads... for the 3 feature maps... 
+                                     outfolder, 
+                                     equalize_hist=equalize_hist, 
+                                     obj_thresh=obj_thresh, 
+                                     nms_thresh=nms_thresh, 
+                                     imsize=imsize, 
+                                     anchors=anchors, 
+                                     class_name_file=class_name_file, 
+                                     debug_viz=debug_viz)
+
+
+def _torch_device(device=None):
+    import torch 
+    if device is None:
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    return torch.device(device)
+
+
+def _torch_predict_fn(model, device, allow_tf32=False):
+    """ wrap a torch model taking NCHW and returning NCHW outputs as a Keras-like predict on NHWC numpy arrays """
+    import torch 
+    import numpy as np 
+    
+    # TF32 convolutions on Ampere+ GPUs change results at the ~1e-3 level; keep full fp32 by default to match Keras.
+    torch.backends.cudnn.allow_tf32 = allow_tf32
+    torch.backends.cuda.matmul.allow_tf32 = allow_tf32
+    
+    def predict(x):
+        with torch.inference_mode():
+            x = torch.from_numpy(np.ascontiguousarray(np.asarray(x, dtype=np.float32).transpose(0,3,1,2))).to(device)
+            out = model(x)
+            if isinstance(out, (list, tuple)):
+                return [o.permute(0,2,3,1).float().cpu().numpy() for o in out]
+            return out.permute(0,2,3,1).float().cpu().numpy()
+    
+    return predict
+
+
+def load_and_run_YOLOv3_weights_torch_detection_model_RGB(vid, 
+                                                          weightsfile,
+                                                          outfolder,  
+                                                          equalize_hist=False,
+                                                          obj_thresh=0.001, 
+                                                          nms_thresh = 0.45,
+                                                          imsize=(512,512),  
+                                                          anchors=None,
+                                                          class_name_file=None,
+                                                          debug_viz=False,
+                                                          device=None,
+                                                          allow_tf32=False):
+    """ PyTorch variant of load_and_run_YOLOv3_weights_keras_detection_model_RGB. 
+    
+    weightsfile is the .pt produced from the Keras .h5 by scripts/convert_keras_weights_to_torch.py. The network outputs are transposed NCHW -> NHWC so they are decoded with exactly the same _decode_netout, _correct_yolo_boxes and _do_nms as the Keras version. 
+    
+    Parameters
+    ----------
+    device : str, optional
+        torch device e.g. 'cuda', 'cpu'. The default uses 'cuda' if available. 
+    allow_tf32 : bool, optional
+        if True, allow TF32 convolutions on Ampere+ GPUs (faster, but no longer numerically matching Keras). The default is False. 
+    
+    See load_and_run_YOLOv3_weights_keras_detection_model_RGB for the other parameters. 
+
+    Returns
+    -------
+    None.
+
+    """
+    from .yolov3_torch import load_yolov3_torch
+    
+    device = _torch_device(device)
+    yolo_model = load_yolov3_torch(weightsfile, device=device)
+    
+    return _run_YOLOv3_detection_RGB(vid, 
+                                     _torch_predict_fn(yolo_model, device, allow_tf32=allow_tf32), 
+                                     outfolder, 
+                                     equalize_hist=equalize_hist, 
+                                     obj_thresh=obj_thresh, 
+                                     nms_thresh=nms_thresh, 
+                                     imsize=imsize, 
+                                     anchors=anchors, 
+                                     class_name_file=class_name_file, 
+                                     debug_viz=debug_viz)
+
+
+class TorchSegmentationModel(object):
+    """ Keras-like wrapper of a PyTorch U-Net segmentation model so it can be passed wherever a Keras segment_model is used, e.g. SPOT.Tracking.track.segment_organoid_bbox_track. 
+    
+    predict takes (n, n_rows, n_cols, n_channels) channels_last images, as the Keras att_unet(..., data_format='channels_last') model, and returns the (n, n_rows, n_cols, n_label) probabilities. 
+    """
+    def __init__(self, model, device=None, batch_size=256, allow_tf32=False):
+        self.device = _torch_device(device)
+        self.model = model.to(self.device).eval()
+        self.batch_size = batch_size
+        self._predict = _torch_predict_fn(self.model, self.device, allow_tf32=allow_tf32)
+        
+    def predict(self, x, batch_size=None):
+        import numpy as np 
+        batch_size = batch_size or self.batch_size
+        x = np.asarray(x)
+        if len(x) == 0:
+            return np.zeros(x.shape[:-1] + (self.model.n_label,), dtype=np.float32)
+        return np.concatenate([self._predict(x[i:i+batch_size]) for i in range(0, len(x), batch_size)], axis=0)
+    
+    def __call__(self, x):
+        return self.predict(x)
+
+
+def load_torch_segmentation_model(weightsfile, device=None, batch_size=256, allow_tf32=False):
+    """ Load the .pt U-Net segmentation model (converted from Keras by scripts/convert_keras_weights_to_torch.py) as a TorchSegmentationModel, a drop-in replacement for the Keras model in SPOT.Tracking.track.segment_organoid_bbox_track. 
+    
+    Parameters
+    ----------
+    weightsfile : str
+        filepath to the .pt weights. 
+    device : str, optional
+        torch device e.g. 'cuda', 'cpu'. The default uses 'cuda' if available. 
+    batch_size : int, optional
+        number of image patches per forward pass. The default is 256. 
+    allow_tf32 : bool, optional
+        if True, allow TF32 convolutions on Ampere+ GPUs (faster, but no longer numerically matching Keras). The default is False. 
+
+    Returns
+    -------
+    segment_model : TorchSegmentationModel
+        model with a Keras-like .predict on channels_last image patches. 
+
+    """
+    from .unets import load_unet_torch
+    
+    return TorchSegmentationModel(load_unet_torch(weightsfile), device=device, batch_size=batch_size, allow_tf32=allow_tf32)
