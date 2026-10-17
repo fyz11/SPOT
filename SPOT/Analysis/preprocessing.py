@@ -409,3 +409,127 @@ def preprocess_feats(X, std_tformer, pow_tformer):
 #         I_query = np.uint8(I_query)
     
 #     return I_query
+
+
+# =============================================================================
+#   Equal weighting of the SAM feature sets and of the feature groups within them
+# =============================================================================
+_HARALICK_NAMES = ('angular_second_moment', 'contrast', 'correlation', 'sum_squares_variance', 'inv_diff_moment',
+                   'sum_average', 'sum_variance', 'sum_entropy', 'entropy', 'diff_variance', 'diff_entropy',
+                   'info_measure_correlation_1', 'info_measure_correlation_2')
+
+# (SAM set, feature group, rule on the feature name), checked in order; the groups are the feature families computed
+# by compute_boundary_morphology_features, compute_boundary_texture_features and compute_boundary_motion_features
+SAM_FEATURE_GROUPS = [
+    # shape
+    ('shape', 'curvature', lambda n: n.endswith('_curvature')),
+    ('shape', 'contour geometry', lambda n: 'centroid_distance' in n or 'chordal' in n),
+    ('shape', 'Fourier', lambda n: n.startswith('Fourier_')),
+    ('shape', 'Euler characteristic transform', lambda n: n.startswith('ECT_')),
+    ('shape', 'shape context', lambda n: n.startswith('Shape_Context_')),
+    ('shape', 'binary morphology', lambda n: n in ('area', 'convex_area', 'perimeter', 'equivalent_diameter',
+                                                   'major_axis_length', 'minor_axis_length', 'area_perim_aspect_ratio',
+                                                   'major_minor_axis_ratio', 'moment_eccentricity', 'solidity', 'extent')
+                                         or n.startswith('hu_moments_') or n.startswith('zernike_moments_')),
+    # appearance
+    ('appearance', 'regional intensity', lambda n: n.startswith('mean_intensity_region_') or n.startswith('stddev_intensity_region_')),
+    ('appearance', 'global intensity', lambda n: n in ('mean_intensity', 'stddev_intensity')),
+    ('appearance', 'Haralick texture', lambda n: n in _HARALICK_NAMES),
+    ('appearance', 'SIFT', lambda n: n.startswith('sift_appear_')),
+    # motion
+    ('motion', 'global motion', lambda n: n.endswith('_global') or n.endswith('_global_flow')),
+    ('motion', 'regional speed', lambda n: n.startswith('mean_speed_flow_region') or n.startswith('stddev_speed_flow_region')),
+    ('motion', 'regional speed distribution', lambda n: n.startswith('hist_bin_')),
+    ('motion', 'speed SIFT', lambda n: n.startswith('sift_motion_')),
+    ('motion', 'curl SIFT', lambda n: n.startswith('curl_sift_')),
+    ('motion', 'divergence SIFT', lambda n: n.startswith('div_sift_')),
+]
+
+
+def sam_feature_groups(feature_names):
+    r""" The SAM feature set (shape, appearance, motion) and feature group of each feature, from its name.
+
+    The groups are the feature families of the SAM phenome (see SAM_FEATURE_GROUPS):
+
+        shape       curvature, contour geometry, binary morphology (regionprops, Hu, Zernike moments), Fourier,
+                    Euler characteristic transform (raw 'ECT_' or the kernel reduced 'ECT_rbf_' features), shape context
+        appearance  global intensity, regional intensity, Haralick texture, SIFT
+        motion      global motion (speed, flow speed, curl, divergence), regional speed, regional speed distribution,
+                    speed SIFT, curl SIFT, divergence SIFT
+
+    Parameters
+    ----------
+    feature_names : (n_feats,) array of str
+        the feature names returned by the SAM feature functions
+
+    Returns
+    -------
+    feature_sets : (n_feats,) str array
+        'shape', 'appearance', 'motion', or 'other' for names that are not SAM features
+    feature_groups : (n_feats,) str array
+        the feature group, or the feature name itself for 'other' features
+    """
+    import numpy as np
+    sets, groups = [], []
+    for name in np.asarray(feature_names).astype(str):
+        for s, g, rule in SAM_FEATURE_GROUPS:
+            if rule(name):
+                sets.append(s); groups.append(g)
+                break
+        else:
+            sets.append('other'); groups.append(name)
+    return np.array(sets), np.array(groups)
+
+
+def weight_sam_features(all_feats, feature_names, group_weighting=True, set_weighting=True, return_weights=False):
+    r""" Weight already normalised (e.g. standard scaled and power transformed) SAM features so that each feature set
+    and each feature group contributes equally to distances (e.g. for UMAP, clustering), instead of in proportion to
+    its number of features.
+
+    The features are centred and scaled per group (group_weighting=True) or per set (group_weighting=False) such that
+        - within each SAM set, every feature group has the same total variance (group_weighting=True), or the set is
+          scaled as a whole, keeping the relative variances of its features (group_weighting=False; with standard scaled
+          inputs every feature then counts equally, so large groups dominate), and
+        - every SAM set (shape, appearance, motion) has total variance 1 (set_weighting=True), or keeps its total
+          variance (set_weighting=False).
+    Features that are not SAM features (see sam_feature_groups) form their own set with each feature its own group.
+
+    Parameters
+    ----------
+    all_feats : (n_objects, n_feats) np.array
+        normalised features
+    feature_names : (n_feats,) np.array
+        the names of the features
+    group_weighting : bool
+        give every feature group within a SAM set the same total variance (e.g. the 6 curvature features count as much
+        as the ~300 shape context features)
+    set_weighting : bool
+        give every SAM set the same total variance
+    return_weights : bool
+        if True also return (mean, weight) such that the output is (all_feats - mean) * weight, to apply the same
+        weighting to new data
+
+    Returns
+    -------
+    all_feats_weighted : (n_objects, n_feats) np.array
+    (mean, weight) : ((n_feats,) np.array, (n_feats,) np.array), if return_weights
+    """
+    import numpy as np
+    X = np.asarray(all_feats, dtype=np.float64)
+    mean = np.nanmean(X, axis=0)
+    var = np.nanvar(X, axis=0)
+    sets, groups = sam_feature_groups(feature_names)
+    weight = np.zeros(X.shape[1])
+    for s in dict.fromkeys(sets):
+        in_set = sets == s
+        set_total = 1. if set_weighting else var[in_set].sum()
+        units = list(dict.fromkeys(groups[in_set])) if group_weighting else [None]
+        for g in units:
+            cols = in_set & (groups == g) if g is not None else in_set
+            total = var[cols].sum()
+            if total > 0:
+                weight[cols] = np.sqrt(set_total / len(units) / total)
+    out = (X - mean[None, :]) * weight[None, :]
+    if return_weights:
+        return out, (mean, weight)
+    return out
