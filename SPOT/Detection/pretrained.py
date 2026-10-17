@@ -9,8 +9,10 @@ Download (and cache) the pretrained SPOT organoid detection and segmentation net
 
 Models (see README.md):
 
-    'yolov3_organoid_detector'          YOLOv3 organoid bounding box detector (Dropbox)
-    'attn_unet_organoid_segmentation'   attention U-Net organoid segmentation of a bounding box crop (GitHub repo)
+    'yolov3_organoid_detector'          YOLOv3 organoid bounding box detector
+    'attn_unet_organoid_segmentation'   attention U-Net organoid segmentation of a bounding box crop
+
+Both are hosted on Zenodo (https://doi.org/10.5281/zenodo.23438299) and checked against their sha256 after download.
 
 Files are cached in the folder given by ``cache_dir``, else the SPOT_MODELS_DIR environment variable, else
 ~/.cache/SPOT/models. A file already in the cache, or in the repository's models/ folder, is not downloaded again.
@@ -25,19 +27,21 @@ import tempfile
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# the weights are hosted on Zenodo: https://doi.org/10.5281/zenodo.23438299
+ZENODO_RECORD = '23438299'
+ZENODO_URL = 'https://zenodo.org/records/' + ZENODO_RECORD + '/files/%s?download=1'
+
 PRETRAINED_MODELS = {
     'yolov3_organoid_detector': dict(
-        url='https://www.dropbox.com/scl/fi/qzowc9s9n30zh6qdyzeqw/keras_YOLOv3_organoid_detector2.h5'
-            '?rlkey=6deiqemsmcz3yin9b5dnz0e6y&dl=1',
+        url=ZENODO_URL % 'keras_YOLOv3_organoid_detector2.h5',
         filename='keras_YOLOv3_organoid_detector2.h5',
         repo_folder=os.path.join('models', 'detect_CNN_model'),
         sha256='5780955baa6fe760de4a77fb5aa67c9b69c31378c75b0daab81d1d20f76b98c9'),
     'attn_unet_organoid_segmentation': dict(
-        url='https://github.com/fyz11/SPOT/raw/main/models/segment_CNN_model/'
-            'organoid-bbox_attn_seg-unet-master-v2_64x64-8feats_v2.h5',
+        url=ZENODO_URL % 'organoid-bbox_attn_seg-unet-master-v2_64x64-8feats_v2.h5',
         filename='organoid-bbox_attn_seg-unet-master-v2_64x64-8feats_v2.h5',
         repo_folder=os.path.join('models', 'segment_CNN_model'),
-        sha256=None),
+        sha256='b25c2303cba9ef8eb5c5e629e3030d6520933cdeac32733a93dd20365395f346'),
 }
 
 _HDF5_SIGNATURE = b'\x89HDF\r\n\x1a\n'

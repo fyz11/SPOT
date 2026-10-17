@@ -33,7 +33,7 @@ if __name__=="__main__":
     fio.mkdir(outfolder)
 
     """
-    Specify the CNN detector weights. Our pretrained detector is downloaded from dropbox and converted to PyTorch automatically on first use (cached in ~/.cache/SPOT/models, or $SPOT_MODELS_DIR).
+    Specify the CNN detector weights. Our pretrained detector is downloaded from Zenodo and converted to PyTorch automatically on first use (cached in ~/.cache/SPOT/models, or $SPOT_MODELS_DIR).
     """
     from SPOT.Detection.pretrained import get_pretrained_weights
     weightsfile = get_pretrained_weights('yolov3_organoid_detector') # or the path to your own converted .pt

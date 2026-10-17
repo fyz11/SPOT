@@ -31,7 +31,7 @@ if __name__=="__main__":
     fio.mkdir(outfolder)
 
     """
-    Specify the CNN detector weights location here. Our pretrained is available and can be downloaded from dropbox. Follow the link in the README.md to download then copy to models/detect_CNN_model/
+    Specify the CNN detector weights location here. Our pretrained is available and can be downloaded from Zenodo (https://doi.org/10.5281/zenodo.23438299). Follow the link in the README.md to download then copy to models/detect_CNN_model/
     """
     # you should download this weights file and place it here. 
     weightsfile = r'./models/detect_CNN_model/keras_YOLOv3_organoid_detector2.h5'

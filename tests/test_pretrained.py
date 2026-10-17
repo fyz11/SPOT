@@ -83,3 +83,13 @@ def test_segmentation_loader_defaults_to_pretrained():
     model = load_torch_segmentation_model(device='cpu')
     patches = np.random.default_rng(0).random((2, 64, 64, 3)).astype(np.float32)
     assert np.isfinite(model.predict(patches)).all()
+
+
+def test_registry_points_to_zenodo_with_checksums():
+    """ both models are hosted on Zenodo record 23438299 and verified with a sha256 (offline check of the registry) """
+    for name, info in pretrained.PRETRAINED_MODELS.items():
+        assert info['url'] == 'https://zenodo.org/records/23438299/files/%s?download=1' % info['filename'], name
+        assert info['sha256'] is not None and len(info['sha256']) == 64, name
+    # the repository copy of the segmentation model is the hosted file
+    import hashlib
+    assert hashlib.sha256(pathlib.Path(SEG_H5).read_bytes()).hexdigest() ==         pretrained.PRETRAINED_MODELS['attn_unet_organoid_segmentation']['sha256']
