@@ -123,9 +123,6 @@ def calls():
     c.append(('texture_masked_contour_only', 'compute_boundary_texture_features',
               lambda d: dict(vid=d['vid'], boundaries=d['boundaries'], use_mask=True)))
     c.append(('motion', 'compute_boundary_motion_features',
-              lambda d: dict(vid_flow=d['flow'], boundaries=d['boundaries'], pixel_res=2., time_res=3., use_mask=False,
-                             motion_sift_zero_inside=True)))  # the original SAM motion features
-    c.append(('motion_unmasked', 'compute_boundary_motion_features',
               lambda d: dict(vid_flow=d['flow'], boundaries=d['boundaries'], pixel_res=2., time_res=3., use_mask=False)))
     c.append(('motion_masked', 'compute_boundary_motion_features',
               lambda d: dict(vid_flow=d['flow'], boundaries=d['boundaries'], use_mask=True, masks=d['masks'])))

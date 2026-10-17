@@ -2045,7 +2045,6 @@ def compute_boundary_motion_features(vid_flow,
                                      use_mask=True,
                                      masked_sift_resize='cap',
                                      masks=None,
-                                     motion_sift_zero_inside=False,
                                      fast=True,
                                      n_jobs=1):
     """ Compute the Motion features for given tracked organoid contour boundaries. Can only computed for a video as opposed to shape and appearance. 
@@ -2083,17 +2082,12 @@ def compute_boundary_motion_features(vid_flow,
     timesample : None or int
         if specified, compute the feature every timesample # of frames. This can be done when in successive frames, the variation does not vary a lot and one wishes to speed up computation or save on memory
     use_mask : bool
-        True by default. If False (the original SAM behaviour), the speed, curl and divergence SIFT descriptors are computed on the bounding box crop with the pixels *inside* the shape set to 0, so they mainly encode the background flow and the object outline i.e. shape. If True, curl and divergence are recomputed from the flow inside the shape mask only (so the flow discontinuity at the boundary does not leak in) and the SIFT descriptors use only gradients of pixels inside the shape mask (with the boundary step edge removed), mean-pooled over shape-adapted ring x sector cells instead of a fixed square grid (see _masked_sift_descriptor), so they describe internal motion only. Global and regional speed statistics are always masked.
+        True by default. If False (the original SAM behaviour), the speed, curl and divergence SIFT descriptors are computed on the bounding box crop with the pixels outside the shape set to 0 (curl and divergence come from the whole frame, so the flow discontinuity at the boundary contributes). If True, curl and divergence are recomputed from the flow inside the shape mask only (so the flow discontinuity at the boundary does not leak in) and the SIFT descriptors use only gradients of pixels inside the shape mask (with the boundary step edge removed), mean-pooled over shape-adapted ring x sector cells instead of a fixed square grid (see _masked_sift_descriptor), so they describe internal motion only. Global and regional speed statistics are always masked.
     masked_sift_resize : 'cap', 'square' or 'native'
         only used if use_mask=True. How the masked patch is rescaled before SIFT. 'cap' (default): downscale preserving aspect ratio so the longest axis is at most max(siftshape). 'square': resize to siftshape as the unmasked SIFT. 'native': no rescaling.
     masks : None or (n_frames, n_rows, n_cols) binary array
         only used if use_mask=True. Optional foreground segmentation masks intersected with the contour mask, for when the boundary contour is coarser than the object and would include background pixels.
 
-    motion_sift_zero_inside : bool
-        only used if use_mask=False. The original SAM motion features set the flow magnitude / curl / divergence *inside*
-        the object to 0 before their SIFT descriptors, so the descriptors mostly describe the background and the
-        outline; False (default) sets the pixels *outside* the object to 0 instead, so they describe the object's own
-        motion. True reproduces the original features.
     fast : bool
         if True (default), run the optimised implementation compute_boundary_motion_features_fast (identical output for n_jobs=1, see its
         docstring); False runs the original implementation.
@@ -2110,7 +2104,7 @@ def compute_boundary_motion_features(vid_flow,
 
     """
     if fast:
-        return compute_boundary_motion_features_fast(vid_flow, boundaries, compute_all_feats=compute_all_feats, compute_global_feats=compute_global_feats, compute_contour_feats=compute_contour_feats, n_contour_feat_bins=n_contour_feat_bins, cnt_sigma=cnt_sigma, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start, pixel_res=pixel_res, time_res=time_res, compute_sift_feats=compute_sift_feats, siftshape=siftshape, timesample=timesample, use_mask=use_mask, masked_sift_resize=masked_sift_resize, masks=masks, motion_sift_zero_inside=motion_sift_zero_inside, n_jobs=n_jobs)
+        return compute_boundary_motion_features_fast(vid_flow, boundaries, compute_all_feats=compute_all_feats, compute_global_feats=compute_global_feats, compute_contour_feats=compute_contour_feats, n_contour_feat_bins=n_contour_feat_bins, cnt_sigma=cnt_sigma, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start, pixel_res=pixel_res, time_res=time_res, compute_sift_feats=compute_sift_feats, siftshape=siftshape, timesample=timesample, use_mask=use_mask, masked_sift_resize=masked_sift_resize, masks=masks, n_jobs=n_jobs)
 
     # boundaries should be at least (n_orgs, timepoints, discretisation, 2)
     # vid_flow is (timepoints-1,  nrows, ncols, 2) (in x,y) format.
@@ -2319,8 +2313,7 @@ def compute_boundary_motion_features(vid_flow,
                             if use_mask:
                                 sift_texture = _masked_sift_descriptor(flow_vid_cnt_, cnt_binary, resize=masked_sift_resize, siftshape=siftshape)
                             else:
-                                # mask to be specific to within the boundary (motion_sift_zero_inside=True: the original, inside set to 0)
-                                flow_vid_cnt_[(cnt_binary>0) if motion_sift_zero_inside else (cnt_binary==0)] = 0
+                                flow_vid_cnt_[cnt_binary==0] = 0 # mask to be specific to within the boundary: the exterior is set to 0.
 
                                 # create the sift extractor for this pseudo image.
                                 siftextractor = SingleSiftExtractor(siftshape[0]) # note this is already in the above.
@@ -2348,7 +2341,7 @@ def compute_boundary_motion_features(vid_flow,
                                 siftextractor = SingleSiftExtractor(siftshape[0]) # note this is already in the above.
 
                                 curl_vid_cnt_ = curl_vid_cnt.copy();
-                                curl_vid_cnt_[(cnt_binary>0) if motion_sift_zero_inside else (cnt_binary==0)] = 0
+                                curl_vid_cnt_[cnt_binary==0] = 0
                                 curl_vid_cnt_im = sktform.resize(curl_vid_cnt_, siftshape, preserve_range=True)
                                 sift_texture = siftextractor.process_image(curl_vid_cnt_im).ravel()
                                 sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
@@ -2366,7 +2359,7 @@ def compute_boundary_motion_features(vid_flow,
                                 siftextractor = SingleSiftExtractor(siftshape[0]) # note this is already in the above.
 
                                 div_vid_cnt_ = div_vid_cnt.copy();
-                                div_vid_cnt_[(cnt_binary>0) if motion_sift_zero_inside else (cnt_binary==0)] = 0
+                                div_vid_cnt_[cnt_binary==0] = 0
                                 div_vid_cnt_im = sktform.resize(div_vid_cnt_, siftshape, preserve_range=True)
                                 sift_texture = siftextractor.process_image(div_vid_cnt_im).ravel()
                                 sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
@@ -3213,7 +3206,7 @@ def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_f
         flow_vid_cnt_ = np.linalg.norm(flow_vid_cnt * pixel_res / float(time_res), axis=-1)
         for sift_im in (flow_vid_cnt_, curl_vid_cnt, div_vid_cnt):
             sift_im = sift_im.copy()
-            sift_im[(cnt_binary>0) if opts.get('motion_sift_zero_inside', False) else (cnt_binary==0)] = 0
+            sift_im[cnt_binary==0] = 0 # the exterior
             sift_inputs.append(sktform.resize(sift_im, siftshape, preserve_range=True))
         return None
 
@@ -3318,7 +3311,7 @@ def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_f
                     sift_texture = pre['sift'][sift_k]
                 else:
                     sift_im = sift_im.copy()
-                    sift_im[(cnt_binary>0) if opts.get('motion_sift_zero_inside', False) else (cnt_binary==0)] = 0
+                    sift_im[cnt_binary==0] = 0 # the exterior
                     sift_im = sktform.resize(sift_im, siftshape, preserve_range=True)
                     sift_texture = siftextractor.process_image(sift_im).ravel()
                 sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
@@ -3368,7 +3361,6 @@ def compute_boundary_motion_features_fast(vid_flow,
                                           use_mask=True,
                                           masked_sift_resize='cap',
                                           masks=None,
-                                          motion_sift_zero_inside=False,
                                           n_jobs=1):
     """ Fast variant of compute_boundary_motion_features with the same parameters and outputs.
 
@@ -3377,11 +3369,6 @@ def compute_boundary_motion_features_fast(vid_flow,
     Parameters
     ----------
     (see compute_boundary_motion_features)
-    motion_sift_zero_inside : bool
-        only used if use_mask=False. The original SAM motion features set the flow magnitude / curl / divergence *inside*
-        the object to 0 before their SIFT descriptors, so the descriptors mostly describe the background and the
-        outline; False (default) sets the pixels *outside* the object to 0 instead, so they describe the object's own
-        motion. True reproduces the original features.
     n_jobs : int
         number of parallel processes over objects (joblib, -1 = all CPUs). With n_jobs=1 the output is identical to the original function; in parallel,
         the worker processes limit the BLAS threads, so BLAS-based statistics (the Haralick features) can differ in floating point round-off (~1e-15 relative), as the original function does under different BLAS thread settings,
@@ -3407,8 +3394,7 @@ def compute_boundary_motion_features_fast(vid_flow,
                 compute_contour_feats=compute_contour_feats, n_contour_feat_bins=n_contour_feat_bins,
                 cnt_sigma=cnt_sigma, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start,
                 pixel_res=pixel_res, time_res=time_res, compute_sift_feats=compute_sift_feats, siftshape=siftshape,
-                use_mask=use_mask, masked_sift_resize=masked_sift_resize,
-                motion_sift_zero_inside=motion_sift_zero_inside)
+                use_mask=use_mask, masked_sift_resize=masked_sift_resize)
     per_obj = _run_fast_feature_chunks(_motion_features_chunk_fast, len(boundaries), n_jobs,
                                        (vid_flow, boundaries, masks, frames, opts))
     return _assemble_fast_features(per_obj, len(boundaries), len(frames))
