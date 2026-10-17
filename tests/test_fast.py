@@ -66,3 +66,16 @@ def test_tile_crop_equals_full_frame(case_data):
                 expect = np.zeros_like(full)
                 expect[r0:r0 + crop.shape[0], c0:c0 + crop.shape[1]] = crop
                 assert np.array_equal(full, expect)
+
+
+@pytest.mark.parametrize('fn_name', ['compute_boundary_morphology_features', 'compute_boundary_texture_features',
+                                     'compute_boundary_motion_features'])
+def test_fast_parallel_over_frames_single_object(fn_name):
+    """ one object over many frames: the frames are split over the workers, same output as serial """
+    d = fixtures.load('synthetic')
+    kw = [c for c in CALLS if c[1] == fn_name][0][2](d)
+    kw['boundaries'] = kw['boundaries'][:1]
+    f1, l1, _ = run_quiet(getattr(sf, fn_name + '_fast'), n_jobs=1, **kw)
+    f3, l3, _ = run_quiet(getattr(sf, fn_name + '_fast'), n_jobs=3, **kw)
+    assert list(l1) == list(l3)
+    np.testing.assert_allclose(np.asarray(f3, np.float64), np.asarray(f1, np.float64), rtol=1e-10, atol=1e-12, equal_nan=True)

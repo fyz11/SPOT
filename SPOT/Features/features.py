@@ -2652,20 +2652,40 @@ def _uniq_tile_regions(boundary_grid, n_contours):
 
 
 def _run_fast_feature_chunks(chunk_fn, n_obj, n_jobs, args):
-    """ run chunk_fn(obj_index_array, *args) over chunks of objects (in parallel with joblib if n_jobs != 1) and return the per object results in object order. """
+    """ run chunk_fn(obj_index_array, *args) over chunks of objects and frames (in parallel with joblib if n_jobs != 1) and return the per object results in object order.
+
+    args ends with (frames, opts). With few objects (e.g. one object tracked over a long video) the frames are also split into chunks, so all workers are used.
+    """
     from tqdm import tqdm
     from joblib import Parallel, delayed, effective_n_jobs
 
     n_jobs = effective_n_jobs(n_jobs)
     if n_obj == 0:
         return []
+    *head, frames, opts = args
+    frames = np.asarray(frames)
     if n_jobs == 1:
-        chunks = [np.array([ii]) for ii in range(n_obj)]
-        results = [chunk_fn(c, *args) for c in tqdm(chunks)]
+        obj_chunks = [np.array([ii]) for ii in range(n_obj)]
+        frame_chunks = [frames]
     else:
-        chunks = [c for c in np.array_split(np.arange(n_obj), min(n_obj, 4*n_jobs)) if len(c) > 0]
-        results = Parallel(n_jobs=n_jobs, backend='loky')(delayed(chunk_fn)(c, *args) for c in tqdm(chunks))
-    return [obj for part in results for obj in part]
+        n_tasks = 4*n_jobs
+        obj_chunks = [c for c in np.array_split(np.arange(n_obj), min(n_obj, n_tasks)) if len(c) > 0]
+        n_frame_chunks = max(1, min(len(frames), int(np.ceil(n_tasks / len(obj_chunks)))))
+        frame_chunks = [f for f in np.array_split(frames, n_frame_chunks) if len(f) > 0]
+    tasks = [(c, f) for c in obj_chunks for f in frame_chunks]
+    if n_jobs == 1:
+        results = [chunk_fn(c, *head, f, opts) for c, f in tqdm(tasks)]
+    else:
+        results = Parallel(n_jobs=n_jobs, backend='loky')(delayed(chunk_fn)(c, *head, f, opts) for c, f in tqdm(tasks))
+    # per object: concatenate the frame chunks in order
+    per_obj = []
+    pos = 0
+    for c in obj_chunks:
+        parts = results[pos:pos+len(frame_chunks)]
+        pos += len(frame_chunks)
+        for kk in range(len(c)):
+            per_obj.append([val for part in parts for val in part[kk]])
+    return per_obj
 
 
 def _assemble_fast_features(per_obj, n_obj, n_time):
@@ -2847,6 +2867,7 @@ def compute_boundary_morphology_features_fast(boundaries, imshape,
         number of parallel processes over objects (joblib, -1 = all CPUs). With n_jobs=1 the output is identical to the original function; in parallel,
         the worker processes limit the BLAS threads, so BLAS-based statistics (the Haralick features) can differ in floating point round-off (~1e-15 relative), as the original function does under different BLAS thread settings,
         and last-bit differences of the vectorised log / arctan2 can rarely move a contour point across a shape context histogram bin edge.
+        boundaries are used in C order; the original function's output can differ in rare tie-breaking cases (pixel-grid contours) when given a non C-contiguous array (e.g. from scipy.io.loadmat).
 
     Returns
     -------
@@ -2857,6 +2878,9 @@ def compute_boundary_morphology_features_fast(boundaries, imshape,
     out_feat_labels_norm : (n_features,) str array
         a boolean vector where 1 or True means the feature is normalised i.e. dimensionless.
     """
+    # C order: the features are sensitive at the last bit to the memory layout of the contours (e.g. reductions such as
+    # the contour mean), which can flip ties on pixel-grid contours; a fixed layout makes all paths identical.
+    boundaries = np.ascontiguousarray(boundaries)
     if timesample is None:
         timesample = 1
     if all_feats_compute==False and ect_features==True and morph_features==False:
@@ -3052,6 +3076,7 @@ def compute_boundary_texture_features_fast(vid, boundaries,
         number of parallel processes over objects (joblib, -1 = all CPUs). With n_jobs=1 the output is identical to the original function; in parallel,
         the worker processes limit the BLAS threads, so BLAS-based statistics (the Haralick features) can differ in floating point round-off (~1e-15 relative), as the original function does under different BLAS thread settings,
         and last-bit differences of the vectorised log / arctan2 can rarely move a contour point across a shape context histogram bin edge.
+        boundaries are used in C order; the original function's output can differ in rare tie-breaking cases (pixel-grid contours) when given a non C-contiguous array (e.g. from scipy.io.loadmat).
 
     Returns
     -------
@@ -3062,6 +3087,9 @@ def compute_boundary_texture_features_fast(vid, boundaries,
     out_feat_labels_norm : (n_features,) str array
         a boolean vector where 1 or True means the feature is normalised i.e. dimensionless.
     """
+    # C order: the features are sensitive at the last bit to the memory layout of the contours (e.g. reductions such as
+    # the contour mean), which can flip ties on pixel-grid contours; a fixed layout makes all paths identical.
+    boundaries = np.ascontiguousarray(boundaries)
     if timesample is None:
         timesample = 1
     vid_range = None
@@ -3297,6 +3325,7 @@ def compute_boundary_motion_features_fast(vid_flow,
         number of parallel processes over objects (joblib, -1 = all CPUs). With n_jobs=1 the output is identical to the original function; in parallel,
         the worker processes limit the BLAS threads, so BLAS-based statistics (the Haralick features) can differ in floating point round-off (~1e-15 relative), as the original function does under different BLAS thread settings,
         and last-bit differences of the vectorised log / arctan2 can rarely move a contour point across a shape context histogram bin edge.
+        boundaries are used in C order; the original function's output can differ in rare tie-breaking cases (pixel-grid contours) when given a non C-contiguous array (e.g. from scipy.io.loadmat).
 
     Returns
     -------
@@ -3307,6 +3336,9 @@ def compute_boundary_motion_features_fast(vid_flow,
     out_feat_labels_norm : (n_features,) str array
         a boolean vector where 1 or True means the feature is normalised i.e. dimensionless.
     """
+    # C order: the features are sensitive at the last bit to the memory layout of the contours (e.g. reductions such as
+    # the contour mean), which can flip ties on pixel-grid contours; a fixed layout makes all paths identical.
+    boundaries = np.ascontiguousarray(boundaries)
     if timesample is None:
         timesample = 1
     frames = np.arange(0, boundaries.shape[1]-1, timesample)

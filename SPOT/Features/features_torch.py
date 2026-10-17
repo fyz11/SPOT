@@ -623,6 +623,9 @@ def compute_boundary_morphology_features_torch(boundaries, imshape,
     out_feat_labels_norm : (n_features,) bool array
     """
     from tqdm import tqdm
+    # C order: the features are sensitive at the last bit to the memory layout of the contours (e.g. reductions such as
+    # the contour mean), which can flip ties on pixel-grid contours; a fixed layout makes all paths identical.
+    boundaries = np.ascontiguousarray(boundaries)
     if timesample is None:
         timesample = 1
     if all_feats_compute==False and ect_features==True and morph_features==False:
@@ -695,6 +698,9 @@ def compute_boundary_texture_features_torch(vid, boundaries,
     """
     import skimage.transform as sktform
     from tqdm import tqdm
+    # C order: the features are sensitive at the last bit to the memory layout of the contours (e.g. reductions such as
+    # the contour mean), which can flip ties on pixel-grid contours; a fixed layout makes all paths identical.
+    boundaries = np.ascontiguousarray(boundaries)
     if timesample is None:
         timesample = 1
     vid_range = None
@@ -798,6 +804,9 @@ def compute_boundary_motion_features_torch(vid_flow,
     out_feat_labels_norm : (n_features,) bool array
     """
     from tqdm import tqdm
+    # C order: the features are sensitive at the last bit to the memory layout of the contours (e.g. reductions such as
+    # the contour mean), which can flip ties on pixel-grid contours; a fixed layout makes all paths identical.
+    boundaries = np.ascontiguousarray(boundaries)
     if timesample is None:
         timesample = 1
     frames = np.arange(0, boundaries.shape[1]-1, timesample)
