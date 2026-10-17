@@ -150,37 +150,46 @@ def _feature_linkage(C, method='average', metric='euclidean'):
     return linkage(C, method=method, metric=metric)
 
 
-def _module_count_intervals(Z, min_module_size=3):
+def _module_count_intervals(Z, min_module_size=3, min_coverage=0.75):
     r""" the number of modules with at least min_module_size features for every range of cut heights of the
-    dendrogram Z: (lo, hi, n_modules) arrays, one per merge (the cut heights in [lo, hi) give n_modules modules).
-    Smaller modules (e.g. single features unrelated to the others) are not counted, so they do not split a scale. """
+    dendrogram Z: (lo, hi, n_modules, valid) arrays, one per merge (the cut heights in [lo, hi) give n_modules
+    modules). Smaller modules (e.g. single features unrelated to the others) are not counted, so they do not split a
+    scale. A range is valid if its modules hold at least min_coverage of the features (low cuts, where most features are
+    still on their own, also give few modules of min_module_size, but are not a scale). """
     n = len(Z) + 1
     size = np.ones(2 * n - 1, dtype=np.int64)
+    big = lambda s: s >= min_module_size  # noqa: E731
     n_big = n if min_module_size <= 1 else 0
+    covered = n if min_module_size <= 1 else 0
     k = np.zeros(len(Z), dtype=np.int64)
+    cov = np.zeros(len(Z))
     for i, (a, b) in enumerate(Z[:, :2].astype(np.int64)):
         size[n + i] = size[a] + size[b]
-        n_big += int(size[n + i] >= min_module_size) - int(size[a] >= min_module_size) - int(size[b] >= min_module_size)
-        k[i] = n_big
+        n_big += int(big(size[n + i])) - int(big(size[a])) - int(big(size[b]))
+        covered += big(size[n + i]) * size[n + i] - big(size[a]) * size[a] - big(size[b]) * size[b]
+        k[i], cov[i] = n_big, covered / n
     h = Z[:, 2]
-    return h, np.r_[h[1:], h[-1]], k
+    hi = np.r_[h[1:], h[-1]]
+    return h, hi, k, (hi > h) & (cov >= min_coverage)
 
 
-def _partition_lifetimes(Z, K, min_module_size=3):
+def _partition_lifetimes(Z, K, min_module_size=3, min_coverage=0.75):
     r""" lifetime of the k-module partition of each k in K: the total range of cut heights over which the dendrogram Z
-    gives k modules (of at least min_module_size features), i.e. the height at which two of them merge minus the
-    height at which they formed, relative to the tree height. Long lifetimes = modules that are internally similar and
-    far apart. """
-    lo, hi, k = _module_count_intervals(Z, min_module_size)
-    length = (hi - lo) / max(Z[-1, 2], 1e-12)
+    gives k modules (of at least min_module_size features, holding at least min_coverage of the features), i.e. the
+    height at which two of them merge minus the height at which they formed, relative to the tree height. Long
+    lifetimes = modules that are internally similar and far apart. """
+    lo, hi, k, valid = _module_count_intervals(Z, min_module_size, min_coverage)
+    length = np.where(valid, hi - lo, 0.) / max(Z[-1, 2], 1e-12)
     return np.array([length[k == kk].sum() for kk in K])
 
 
-def _cut_height(Z, k, min_module_size=3):
-    r""" the cut height giving k modules (of at least min_module_size features): the middle of the longest range of
-    heights with k modules, or of the range with the nearest number of modules if k never occurs """
-    lo, hi, kk = _module_count_intervals(Z, min_module_size)
-    valid = hi > lo
+def _cut_height(Z, k, min_module_size=3, min_coverage=0.75):
+    r""" the cut height giving k modules (of at least min_module_size features, holding at least min_coverage of the
+    features): the middle of the longest range of heights with k modules, or of the range with the nearest number of
+    modules if k never occurs """
+    lo, hi, kk, valid = _module_count_intervals(Z, min_module_size, min_coverage)
+    if not valid.any():  # no cut covers enough features: use all the ranges
+        valid = hi > lo
     if not valid.any():
         return Z[-1, 2] + 1.
     if not np.any(valid & (kk == k)):
@@ -190,11 +199,11 @@ def _cut_height(Z, k, min_module_size=3):
     return 0.5 * (lo[i] + hi[i])
 
 
-def _cut_modules(Z, k, min_module_size=3):
+def _cut_modules(Z, k, min_module_size=3, min_coverage=0.75):
     r""" the module labels (1..m) of the cut of Z with k modules of at least min_module_size features (the smaller
     modules are kept as their own modules) """
     from scipy.cluster.hierarchy import fcluster
-    return fcluster(Z, _cut_height(Z, k, min_module_size), criterion='distance')
+    return fcluster(Z, _cut_height(Z, k, min_module_size, min_coverage), criterion='distance')
 
 
 def _null_trees(X, method, metric, n_null, rng):
@@ -222,7 +231,7 @@ def _module_indices(C, labels):
             np.log(max(calinski_harabasz_score(C, labels), 1e-12)), corr_gap)
 
 
-def _bootstrap_stability(X, ref_labels, K, method, metric, n_boot, rng, min_module_size=3):
+def _bootstrap_stability(X, ref_labels, K, method, metric, n_boot, rng, min_module_size=3, min_coverage=0.75):
     r""" mean adjusted Rand index between the module partition of the full data (ref_labels, one per k in K) and the
     partitions with the same number of modules of trees built on bootstrap resamples of the objects """
     from sklearn.metrics import adjusted_rand_score
@@ -230,23 +239,28 @@ def _bootstrap_stability(X, ref_labels, K, method, metric, n_boot, rng, min_modu
     stab = np.zeros(len(K))
     for _ in range(n_boot):
         Zb = _feature_linkage(_corr(X[rng.integers(0, len(X), len(X))]), method, metric)
-        stab += [adjusted_rand_score(ref, _cut_modules(Zb, k, min_module_size)) for ref, k in zip(ref_labels, K)]
+        stab += [adjusted_rand_score(ref, _cut_modules(Zb, k, min_module_size, min_coverage))
+                 for ref, k in zip(ref_labels, K)]
     return stab / max(n_boot, 1)
 
 
 def select_SAM_module_scales(all_feats, Z=None, C=None, hcluster_method='average', hcluster_metric='euclidean',
                              k_max=None, min_module_size=3, min_coverage=0.75, n_scales=5, n_null=10, n_boot=10,
-                             max_objects=5000, min_stability=0.6, scale='best', random_state=0):
+                             max_objects=5000, min_stability=0.6, scale='best', parsimony=0.2, random_state=0):
     r""" Multi-scale selection of the number of SAM modules from the hierarchical clustering of the features.
 
     Candidate scales are the numbers of modules k (counting modules of at least min_module_size features, so features
     unrelated to all others do not count as modules) whose partition of the dendrogram lives longest compared with a
     null (the features permuted independently across objects, which removes their covariation): a long lifetime means
     the modules are internally similar (formed at a low height) and far apart (merge at a large height). Each candidate
-    is then scored by a consensus (mean rank) of the null-referenced lifetime, four cluster validity indices
-    (silhouette, Davies-Bouldin, Calinski-Harabasz, within- minus between-module correlation, each relative to the null
-    trees cut at the same number of modules, since they all drift with the number of modules) and its stability under
-    bootstrap resampling of the objects.
+    is then scored by a consensus of the null-referenced lifetime, four cluster validity indices (silhouette,
+    Davies-Bouldin, Calinski-Harabasz, within- minus between-module correlation, each relative to the null trees cut at
+    the same number of modules, since they all drift with the number of modules) and its stability under bootstrap
+    resampling of the objects: the mean of the criteria, each scaled to [0, 1] over the candidates (consensus_score).
+
+    Occam's razor (parsimony): of the stable candidates whose consensus_score is within parsimony of the best, the one
+    with the fewest modules is selected (as the one standard error rule), so a finer scale is only chosen if it is
+    clearly better. parsimony=0 selects the best score; parsimony=1 always the coarsest stable candidate.
 
     Parameters
     ----------
@@ -263,8 +277,8 @@ def select_SAM_module_scales(all_feats, Z=None, C=None, hcluster_method='average
     min_module_size : int
         modules with fewer features are not counted in the number of modules (they are kept as their own modules)
     min_coverage : float
-        candidate scales need at least this fraction of the features in modules of at least min_module_size features
-        (finer cuts that leave many features on their own are not candidates, unless no scale passes)
+        a cut of the dendrogram is a scale only if its modules of at least min_module_size features hold at least this
+        fraction of the features (low cuts, which leave most features on their own, are not)
     n_scales : int
         maximum number of candidate scales scored
     n_null : int
@@ -276,8 +290,11 @@ def select_SAM_module_scales(all_feats, Z=None, C=None, hcluster_method='average
     min_stability : float
         candidates with a bootstrap stability (mean adjusted Rand index) below this are not selected (unless none passes)
     scale : 'best', 'coarse', 'fine' or int
-        'best': the stable candidate with the best consensus rank; 'coarse' / 'fine': the stable candidate with the
-        fewest / most modules; int: this number of modules (the nearest number the dendrogram gives)
+        'best': the parsimonious choice among the stable candidates (see parsimony); 'coarse' / 'fine': the stable
+        candidate with the fewest / most modules; int: this number of modules (the nearest number the dendrogram gives)
+    parsimony : float (0-1)
+        scale='best' only: tolerance on the consensus_score (0-1) within which fewer modules are preferred to the best
+        score. Larger = coarser.
     random_state : int
         seed of the null and bootstrap
 
@@ -291,7 +308,8 @@ def select_SAM_module_scales(all_feats, Z=None, C=None, hcluster_method='average
     scales : pandas DataFrame
         one row per candidate k: n_modules, n_small_modules (of fewer features), coverage, lifetime, lifetime_null,
         lifetime_gap, silhouette, neg_davies_bouldin, log_calinski_harabasz, corr_within_minus_between, the same four
-        minus their null (*_gap), stability, consensus_rank (1 = best), selected. scales.attrs['k'] / ['lifetime_gap'] hold the whole lifetime curve.
+        minus their null (*_gap), stability, consensus_score (0-1, higher = better), selected.
+        scales.attrs['k'] / ['lifetime_gap'] hold the whole lifetime curve.
     """
     import pandas as pd
 
@@ -307,26 +325,20 @@ def select_SAM_module_scales(all_feats, Z=None, C=None, hcluster_method='average
     k_max = int(max(2, min(k_max, n_feats - 1)))
     K = np.arange(2, k_max + 1)
     sub = X if len(X) <= max_objects else X[rng.choice(len(X), max_objects, replace=False)]
+    mm = dict(min_module_size=min_module_size, min_coverage=min_coverage)
 
-    life = _partition_lifetimes(Z, K, min_module_size)
+    life = _partition_lifetimes(Z, K, **mm)
     nulls = _null_trees(sub, hcluster_method, hcluster_metric, n_null, rng)
-    life_null = (np.mean([_partition_lifetimes(Zp, K, min_module_size) for _, Zp in nulls], axis=0)
+    life_null = (np.mean([_partition_lifetimes(Zp, K, **mm) for _, Zp in nulls], axis=0)
                  if n_null > 0 else 0. * life)
     gap = life - life_null
 
-    # candidates: local maxima of the null-referenced lifetime, longest first, whose modules (of at least
-    # min_module_size features) hold at least min_coverage of the features
-    lo, hi, kk = _module_count_intervals(Z, min_module_size)
-    coverage = np.zeros(len(K))
-    for i, k in enumerate(K):
-        if np.any((kk == k) & (hi > lo)):
-            sizes = np.bincount(_cut_modules(Z, k, min_module_size))[1:]
-            coverage[i] = sizes[sizes >= min_module_size].sum() / n_feats
+    # candidates: local maxima of the null-referenced lifetime (at valid cuts), longest first
     padded = np.r_[-np.inf, gap, -np.inf]
-    is_peak = (padded[1:-1] > padded[:-2]) & (padded[1:-1] >= padded[2:]) & (gap > 0)
-    peaks = np.flatnonzero(is_peak & (coverage >= min_coverage))
+    is_peak = (padded[1:-1] > padded[:-2]) & (padded[1:-1] >= padded[2:]) & (gap > 0) & (life > 0)
+    peaks = np.flatnonzero(is_peak)
     if len(peaks) == 0:
-        peaks = np.flatnonzero(is_peak) if is_peak.any() else np.array([int(np.argmax(gap))])
+        peaks = np.array([int(np.argmax(np.where(life > 0, gap, -np.inf)))])
     peaks = peaks[np.argsort(-gap[peaks])][:n_scales]
     if not isinstance(scale, str) and int(scale) not in K[peaks]:
         if not 1 <= int(scale) <= n_feats:
@@ -334,17 +346,17 @@ def select_SAM_module_scales(all_feats, Z=None, C=None, hcluster_method='average
         peaks = np.r_[peaks, -1]  # a user given k outside the candidates: scored too
     Ks = np.array([K[p] if p >= 0 else int(scale) for p in peaks])
 
-    labels = [_cut_modules(Z, k, min_module_size) for k in Ks]
+    labels = [_cut_modules(Z, k, **mm) for k in Ks]
     ind = np.array([_module_indices(C, lab) for lab in labels])
     # the indices relative to the null trees cut at the same number of modules (removes their drift with k)
-    ind_null = (np.nanmean([[_module_indices(Cp, _cut_modules(Zp, k, min_module_size)) for k in Ks] for Cp, Zp in nulls],
-                           axis=0) if n_null > 0 else np.zeros_like(ind))
-    stab = (_bootstrap_stability(sub, labels, Ks, hcluster_method, hcluster_metric, n_boot, rng, min_module_size)
+    ind_null = (np.nanmean([[_module_indices(Cp, _cut_modules(Zp, k, **mm)) for k in Ks]
+                            for Cp, Zp in nulls], axis=0) if n_null > 0 else np.zeros_like(ind))
+    stab = (_bootstrap_stability(sub, labels, Ks, hcluster_method, hcluster_metric, n_boot, rng, **mm)
             if n_boot > 0 else np.ones(len(Ks)))
+    sizes = [np.bincount(lab)[1:] for lab in labels]
     scales = pd.DataFrame(dict(n_modules=Ks,
-                               n_small_modules=[int((np.bincount(lab)[1:] < min_module_size).sum()) for lab in labels],
-                               coverage=[np.bincount(lab)[1:][np.bincount(lab)[1:] >= min_module_size].sum() / n_feats
-                                         for lab in labels],
+                               n_small_modules=[int((s < min_module_size).sum()) for s in sizes],
+                               coverage=[s[s >= min_module_size].sum() / n_feats for s in sizes],
                                lifetime=[life[p] if p >= 0 else np.nan for p in peaks],
                                lifetime_null=[life_null[p] if p >= 0 else np.nan for p in peaks],
                                lifetime_gap=[gap[p] if p >= 0 else np.nan for p in peaks],
@@ -353,8 +365,9 @@ def select_SAM_module_scales(all_feats, Z=None, C=None, hcluster_method='average
     index_names = ['silhouette', 'neg_davies_bouldin', 'log_calinski_harabasz', 'corr_within_minus_between']
     for i, name in enumerate(index_names):
         scales[name + '_gap'] = ind[:, i] - ind_null[:, i]
-    crit = ['lifetime_gap'] + [name + '_gap' for name in index_names] + ['stability']
-    scales['consensus_rank'] = scales[crit].rank(ascending=False, na_option='bottom').mean(axis=1).rank(method='min')
+    crit = scales[['lifetime_gap'] + [name + '_gap' for name in index_names] + ['stability']]
+    span = (crit.max() - crit.min()).replace(0, 1.)
+    scales['consensus_score'] = ((crit - crit.min()) / span).fillna(0.).mean(axis=1)
 
     if not isinstance(scale, str):
         n_modules = int(scale)
@@ -363,7 +376,7 @@ def select_SAM_module_scales(all_feats, Z=None, C=None, hcluster_method='average
         if len(ok) == 0:
             ok = scales.loc[[scales.stability.idxmax()]]
         if scale == 'best':
-            n_modules = int(ok.sort_values(['consensus_rank', 'stability'], ascending=[True, False]).n_modules.iloc[0])
+            n_modules = int(ok[ok.consensus_score >= ok.consensus_score.max() - parsimony].n_modules.min())
         elif scale == 'coarse':
             n_modules = int(ok.n_modules.min())
         elif scale == 'fine':
@@ -373,7 +386,7 @@ def select_SAM_module_scales(all_feats, Z=None, C=None, hcluster_method='average
     scales['selected'] = scales.n_modules == n_modules
     scales = scales.sort_values('n_modules').reset_index(drop=True)
     scales.attrs['k'], scales.attrs['lifetime_gap'] = K, gap  # the full curve, for plotting
-    return n_modules, _cut_height(Z, n_modules, min_module_size), scales
+    return n_modules, _cut_height(Z, n_modules, **mm), scales
 
 
 def hierarchical_cluster_features_into_SAM_modules(all_feats,
@@ -401,6 +414,7 @@ def hierarchical_cluster_features_into_SAM_modules(all_feats,
                                                    n_boot=10,
                                                    max_objects=5000,
                                                    min_stability=0.6,
+                                                   parsimony=0.2,
                                                    random_state=0,
                                                    return_scales=False):
 
@@ -440,11 +454,14 @@ def hierarchical_cluster_features_into_SAM_modules(all_feats,
         how the number of SAM modules is chosen.
         'multiscale' (default, see select_SAM_module_scales): the candidate scales are the numbers of modules whose partition of the dendrogram lives longest compared with a null of
         independently permuted features (modules internally similar and far apart); each is scored by a consensus of the lifetime, silhouette, Davies-Bouldin, Calinski-Harabasz,
-        within- minus between-module correlation and bootstrap stability, and the best stable one is used.
+        within- minus between-module correlation and bootstrap stability; of the stable ones within parsimony of the best score, the one with the fewest modules is used.
         'legacy': the original SPOT rule, the first peak of the smoothed davies_bouldin_score over the dendrogram cuts. Note Davies-Bouldin is lower = better, so this selects a
         locally worst partition; kept to reproduce earlier results (if the curve has no peak its minimum is used).
     scale : 'best', 'coarse', 'fine' or int
-        module_selection='multiscale' only: 'best' the stable candidate with the best consensus rank, 'coarse' / 'fine' the stable candidate with the fewest / most modules, or an int number of modules
+        module_selection='multiscale' only: 'best' the parsimonious choice among the stable candidates (see parsimony), 'coarse' / 'fine' the stable candidate with the fewest / most modules, or an int number of modules
+    parsimony : float (0-1)
+        module_selection='multiscale', scale='best' only: Occam's razor. Of the stable candidate scales whose consensus score (0-1) is within parsimony of the best,
+        the one with the fewest modules is used, so finer scales are only chosen if clearly better. 0 = best score, larger = coarser.
     k_max, min_module_size, min_coverage, n_scales, n_null, n_boot, max_objects, min_stability, random_state :
         module_selection='multiscale' only, see select_SAM_module_scales
     return_scales : bool
@@ -549,6 +566,7 @@ def hierarchical_cluster_features_into_SAM_modules(all_feats,
                                                                  min_coverage=min_coverage, n_scales=n_scales,
                                                                  n_null=n_null, n_boot=n_boot, max_objects=max_objects,
                                                                  min_stability=min_stability, scale=scale,
+                                                                 parsimony=parsimony,
                                                                  random_state=random_state)
         final_feature_clusters = fcluster(Z, cut_height, criterion='distance')
         if debugviz:

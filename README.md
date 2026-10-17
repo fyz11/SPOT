@@ -153,13 +153,13 @@ For embeddings and clustering of the SAM phenome we recommend `weight_sam_featur
 `SPOT.Analysis.sam_analysis.hierarchical_cluster_features_into_SAM_modules` groups the features into SAM modules by hierarchical clustering of their correlation profiles. The number of modules is chosen with `module_selection='multiscale'` (default; `select_SAM_module_scales`):
 - **Candidate scales.** These are the numbers of modules whose partition of the dendrogram lives longest compared with a null of independently permuted features. A long lifetime means the modules are internally similar and far apart.
   - Only modules of at least `min_module_size=3` features are counted.
-  - A candidate must cover at least `min_coverage=0.75` of the features.
+  - A cut is a scale only if its modules cover at least `min_coverage=0.75` of the features.
 - **Scoring.** Each candidate is scored by a consensus of:
   - the lifetime;
   - the silhouette, Davies–Bouldin, Calinski–Harabasz and within-minus-between-module correlation, each relative to the null;
   - bootstrap stability.
 - **Choosing.**
-  - `scale='best'` (default): the stable candidate with the best consensus.
+  - `scale='best'` (default), with Occam's razor: among the stable candidates whose consensus score (0–1) is within `parsimony=0.2` of the best, the one with the fewest modules (as the one-standard-error rule). A finer scale is only chosen if it is clearly better. `parsimony=0` takes the best score; larger values give coarser modules.
   - `'coarse'` / `'fine'`: the stable candidate with the fewest / most modules.
   - An int: that number of modules.
 - **Diagnostics.** `return_scales=True` also returns the table of candidate scales.

@@ -61,7 +61,7 @@ def test_multiscale_finds_nested_scales(n_noise):
     from sklearn.metrics import adjusted_rand_score
     assert adjusted_rand_score(planted, fine[:72]) == 1.0
     for col in ['n_modules', 'n_small_modules', 'coverage', 'lifetime_gap', 'silhouette_gap', 'stability',
-                'consensus_rank', 'selected']:
+                'consensus_score', 'selected']:
         assert col in scales
 
 
@@ -70,6 +70,27 @@ def test_scale_options():
     coarse, fine = n_big(run(X, scale='coarse')[1]), n_big(run(X, scale='fine')[1])
     assert coarse <= fine
     assert n_big(run(X, scale=9)[1]) == 9
+
+
+def test_parsimony():
+    """ parsimony=0 takes the best consensus score, larger values prefer fewer modules (Occam's razor) """
+    X = nested()
+    k0, _, scales = sam.select_SAM_module_scales(X, parsimony=0)
+    stable = scales[scales.stability >= 0.6]
+    assert k0 == int(stable.n_modules[stable.consensus_score.idxmax()])
+    k1, _, _ = sam.select_SAM_module_scales(X, parsimony=1)
+    assert k1 == int(stable.n_modules.min())
+    ks = [sam.select_SAM_module_scales(X, parsimony=p)[0] for p in (0, 0.2, 0.5, 1)]
+    assert ks == sorted(ks, reverse=True)
+
+
+def test_low_cuts_are_not_scales():
+    """ cuts low in the tree, where most features are still on their own, never give the modules """
+    X = nested()
+    Z = sam._feature_linkage(sam._corr(X))
+    for k in (2, 3, 4, 9):
+        sizes = np.bincount(sam._cut_modules(Z, k))[1:]
+        assert sizes[sizes >= 3].sum() / X.shape[1] >= 0.75
 
 
 def test_no_structure_does_not_crash():
@@ -84,9 +105,10 @@ def test_module_count_intervals():
     from scipy.cluster.hierarchy import fcluster
     X = nested(n_noise=0)
     Z = sam._feature_linkage(sam._corr(X))
-    lo, hi, k = sam._module_count_intervals(Z, min_module_size=1)
+    lo, hi, k, valid = sam._module_count_intervals(Z, min_module_size=1)
+    assert valid[hi > lo].all()
     # with min_module_size=1 every cut counts all clusters: n - 1 - i after merge i
     assert list(k) == list(len(Z) - np.arange(len(Z)))
     for kk in (3, 9):
         assert n_big(sam._cut_modules(Z, kk), 3) == kk
-        assert len(np.unique(fcluster(Z, sam._cut_height(Z, kk, 1), 'distance'))) == kk
+        assert len(np.unique(fcluster(Z, sam._cut_height(Z, kk, 1, 0.), 'distance'))) == kk
