@@ -350,8 +350,12 @@ def hierarchical_cluster_features_into_SAM_modules(all_feats,
     Use peaks
     """
     min_peak, min_peak_props = find_peaks(scores_all_smooth, distance=min_peak_distance)
-    stop_module = min_peak[0]
-    
+    if len(min_peak) > 0:
+        stop_module = min_peak[0]
+    else:
+        # no interior peak (monotonic score curve): use the number of modules with the best smoothed score
+        stop_module = int(np.argmax(scores_all_smooth))
+
     if debugviz:
         plt.figure(figsize=(5,5))
         plt.plot(np.arange(len(labels_all))+2, scores_all,'k', lw=2)
