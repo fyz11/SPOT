@@ -57,6 +57,20 @@ def test_non_hdf5_download_raises(monkeypatch, tmp_path):
     _serve(monkeypatch, 'yolov3_organoid_detector', page, tmp_path)
     with pytest.raises(IOError, match='not an HDF5'):
         pretrained.get_pretrained_weights('yolov3_organoid_detector', cache_dir=str(tmp_path / 'cache'), progress=False)
+    assert not list((tmp_path / 'cache').iterdir())  # the bad download is not left as a cached .h5
+
+
+def test_deleted_dropbox_file_message_and_url_override(monkeypatch, tmp_path):
+    page = tmp_path / 'page.html'
+    page.write_text('<html><title>Dropbox - File Deleted - Simplify your life</title></html>')
+    _serve(monkeypatch, 'yolov3_organoid_detector', page, tmp_path)
+    with pytest.raises(IOError, match='has been deleted'):
+        pretrained.get_pretrained_weights('yolov3_organoid_detector', torch=False, cache_dir=str(tmp_path / 'c1'),
+                                          progress=False)
+    # a working link passed with url= is used instead
+    h5 = pretrained.get_pretrained_weights('yolov3_organoid_detector', torch=False, cache_dir=str(tmp_path / 'c2'),
+                                           progress=False, url=pathlib.Path(SEG_H5).resolve().as_uri())
+    assert pathlib.Path(h5).read_bytes() == pathlib.Path(SEG_H5).read_bytes()
 
 
 def test_unknown_model():

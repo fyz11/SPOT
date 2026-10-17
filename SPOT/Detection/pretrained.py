@@ -95,15 +95,20 @@ def download_file(url, path, progress=True, timeout=60):
     return path
 
 
-def _check_hdf5(path, name):
+def _check_hdf5(path, name, url):
+    """ raise (and delete the file) if the download is not an HDF5 file, e.g. a web page of a moved / deleted file """
     with open(path, 'rb') as f:
-        if f.read(8) != _HDF5_SIGNATURE:
-            raise IOError('The download of %s (%s) is not an HDF5 / Keras .h5 file; the link may have changed or '
-                          'require a browser. Download it manually (see README.md) and pass its path, or place it in %s.'
-                          % (name, path, os.path.dirname(path)))
+        head = f.read(8)
+        if head == _HDF5_SIGNATURE:
+            return
+        page = (head + f.read(1 << 16)).decode('utf-8', errors='ignore')
+    os.remove(path)
+    reason = 'the hosted file has been deleted' if 'File Deleted' in page else              'the link may have changed or require a browser'
+    raise IOError('The download of %s from %s is not an HDF5 / Keras .h5 file (%s). Pass a working link with url=..., '
+                  'or download the file manually and place it in %s.' % (name, url, reason, os.path.dirname(path)))
 
 
-def get_pretrained_weights(name, torch=True, cache_dir=None, force_download=False, progress=True):
+def get_pretrained_weights(name, torch=True, cache_dir=None, force_download=False, progress=True, url=None):
     """ Path to the pretrained weights of a SPOT network, downloading (and converting to PyTorch) on first use.
 
     Parameters
@@ -119,6 +124,8 @@ def get_pretrained_weights(name, torch=True, cache_dir=None, force_download=Fals
         download (and convert) again even if the file is cached
     progress : bool
         show a download progress bar
+    url : None or str
+        download from this link instead of PRETRAINED_MODELS[name]['url'] (e.g. if the hosted file moved)
 
     Returns
     -------
@@ -140,9 +147,10 @@ def get_pretrained_weights(name, torch=True, cache_dir=None, force_download=Fals
                 break
     if h5file is None:
         h5file = os.path.join(cache_dir, info['filename'])
+        url = url or info['url']
         print('downloading %s to %s' % (name, h5file))
-        download_file(info['url'], h5file, progress=progress)
-        _check_hdf5(h5file, name)
+        download_file(url, h5file, progress=progress)
+        _check_hdf5(h5file, name, url)
         if info['sha256'] is not None and _sha256(h5file) != info['sha256']:
             os.remove(h5file)
             raise IOError('checksum mismatch for the download of %s' % name)
