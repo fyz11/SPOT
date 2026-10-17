@@ -2544,10 +2544,52 @@ def reorient_contour_fast(cnt, shape):
     return cnt_rot
 
 
+def _linspace_rows(stop, num):
+    """ np.array([np.linspace(0, l, num) for l in stop]) without the loop, with the same arithmetic as np.linspace. """
+    stop = np.asarray(stop, dtype=np.float64)
+    div = num - 1
+    y = np.arange(0, num, dtype=np.float64)[None,:]
+    step = stop / div
+    zero = step == 0
+    out = y * step[:,None]
+    if zero.any():
+        out[zero] = (y / div) * stop[zero][:,None]
+    out += 0.
+    out[:,-1] = stop
+    return out
+
+
+def _radial_window_int_lines(imsize, n_r, boundary_line, center=None):
+    """ the integer polygon vertices (rows, cols) of the n_r+1 nested window boundaries of _tile_uniform_radial_windows_boundary, as rasterised by its _draw_polygon_mask, and the center used. """
+    m, n = imsize
+
+    if center is None:
+        center = np.nanmean(boundary_line[:-1], axis=0)
+
+    edge_line_polar = np.vstack(_cart2pol(boundary_line[:,1] - center[1], boundary_line[:,0] - center[0])).T
+    edge_line_central = np.vstack(_pol2cart(edge_line_polar[:,0], edge_line_polar[:,1])).T
+
+    contour_r_internal_polar = _linspace_rows(edge_line_polar[:,0], n_r+1).T
+    contour_r_internal_lines = [np.vstack(_pol2cart(l, edge_line_polar[:,1])).T for l in contour_r_internal_polar][:-1]
+
+    all_dist_lines = contour_r_internal_lines + [edge_line_central]
+    all_dist_lines = [np.vstack([ll[:,0] + center[1], ll[:,1] + center[0]]).T  for ll in all_dist_lines]
+
+    int_lines = [(np.clip(ll[:,1].astype(np.int32), 0, m-1), np.clip(ll[:,0].astype(np.int32), 0, n-1)) for ll in all_dist_lines]
+    return int_lines, center
+
+
 def _tile_uniform_radial_windows_boundary_crop(imsize, n_r, n_theta, boundary_line,
                                                center=None,
-                                               zero_angle=None):
+                                               zero_angle=None,
+                                               line_pixels=None):
     """ _tile_uniform_radial_windows_boundary computed only within the bounding box of the windows.
+
+    Parameters
+    ----------
+    (see _tile_uniform_radial_windows_boundary)
+    line_pixels : None or list of (rr, cc)
+        the rasterised polygons of _radial_window_int_lines(imsize, n_r, boundary_line, center), if already computed (e.g. on the GPU). If None they are rasterised with skimage.draw.polygon.
 
     Returns
     -------
@@ -2558,30 +2600,16 @@ def _tile_uniform_radial_windows_boundary_crop(imsize, n_r, n_theta, boundary_li
     """
     from skimage.draw import polygon
 
-    m, n = imsize
-
-    if center is None:
-        center = np.nanmean(boundary_line[:-1], axis=0)
-
-    edge_line_polar = np.vstack(_cart2pol(boundary_line[:,1] - center[1], boundary_line[:,0] - center[0])).T
-    edge_line_central = np.vstack(_pol2cart(edge_line_polar[:,0], edge_line_polar[:,1])).T
-
-    contour_r_internal_polar = np.array([np.linspace(0, l, n_r+1) for l in edge_line_polar[:,0]]).T
-    contour_r_internal_lines = [np.vstack(_pol2cart(l, edge_line_polar[:,1])).T for l in contour_r_internal_polar][:-1]
-
-    all_dist_lines = contour_r_internal_lines + [edge_line_central]
-    all_dist_lines = [np.vstack([ll[:,0] + center[1], ll[:,1] + center[0]]).T  for ll in all_dist_lines]
-
-    # integer polygon vertices exactly as _draw_polygon_mask
-    int_lines = [(np.clip(ll[:,1].astype(np.int32), 0, m-1), np.clip(ll[:,0].astype(np.int32), 0, n-1)) for ll in all_dist_lines]
+    int_lines, center = _radial_window_int_lines(imsize, n_r, boundary_line, center=center)
     r0 = int(min(yy.min() for yy, xx in int_lines)); r1 = int(max(yy.max() for yy, xx in int_lines))
     c0 = int(min(xx.min() for yy, xx in int_lines)); c1 = int(max(xx.max() for yy, xx in int_lines))
     crop_shape = (r1-r0+1, c1-c0+1)
 
+    if line_pixels is None:
+        line_pixels = [polygon(yy, xx) for yy, xx in int_lines]
     all_dist_masks = []
-    for yy, xx in int_lines:
+    for rr, cc in line_pixels:
         img = np.zeros(crop_shape, dtype=bool)
-        rr, cc = polygon(yy, xx)
         img[rr-r0, cc-c0] = 1
         all_dist_masks.append(img)
     all_dist_masks = [np.logical_xor(all_dist_masks[ii+1], all_dist_masks[ii]) for ii in range(len(all_dist_masks)-1)]
@@ -2662,14 +2690,15 @@ def _assemble_fast_features(per_obj, n_obj, n_time):
     return out_array, out_feat_labels, out_feat_labels_norm
 
 
-def _morphology_features_sample_fast(boundary_ii_tt, imshape, opts):
-    """ shape features of one contour, as in compute_boundary_morphology_features """
+def _morphology_features_sample_fast(boundary_ii_tt, imshape, opts, pre=None):
+    """ shape features of one contour, as in compute_boundary_morphology_features. pre: optional dict of precomputed 'reoriented' contour, contour 'binary' and 'ect' features (e.g. by the torch variant). """
     from sklearn.metrics.pairwise import pairwise_distances
 
     all_feats_compute = opts['all_feats_compute']
     pixel_xy_res = opts['pixel_xy_res']
 
-    boundary_ii_tt = reorient_contour_fast(boundary_ii_tt, imshape)
+    pre = {} if pre is None else pre
+    boundary_ii_tt = pre['reoriented'] if 'reoriented' in pre else reorient_contour_fast(boundary_ii_tt, imshape)
 
     all_feats = []
     all_feats_labels = []
@@ -2732,7 +2761,7 @@ def _morphology_features_sample_fast(boundary_ii_tt, imshape, opts):
 
     cnt_binary = None
     if all_feats_compute==True or (all_feats_compute==False and opts['morph_features']==True):
-        cnt_binary = contour_to_binary(boundary_ii_tt, shape=None)
+        cnt_binary = pre['binary'] if 'binary' in pre else contour_to_binary(boundary_ii_tt, shape=None)
         cnt_binary_feats_nonnorm, cnt_binary_feats_norm = extract_binary_regionprops(cnt_binary, pixel_xy_res=pixel_xy_res)
 
         cnt_binary_feats_nonnorm, cnt_binary_feats_nonnorm_labels = cnt_binary_feats_nonnorm
@@ -2758,7 +2787,7 @@ def _morphology_features_sample_fast(boundary_ii_tt, imshape, opts):
 
     if all_feats_compute==True or (all_feats_compute==False and opts['ect_features']==True):
         # as in the original, the binary comes from the morphological features block
-        ect_feat = _ect_fast(cnt_binary, _regular_directions(36, dims=2), T=32)
+        ect_feat = pre['ect'] if 'ect' in pre else _ect_fast(cnt_binary, _regular_directions(36, dims=2), T=32)
 
         all_feats.append(ect_feat)
         all_feats_labels.append(np.hstack(['ECT_%s' %(str(f_ii+1)) for f_ii in range(len(ect_feat))]))
@@ -2842,32 +2871,53 @@ def compute_boundary_morphology_features_fast(boundaries, imshape,
     return _assemble_fast_features(per_obj, len(boundaries), len(frames))
 
 
-def _texture_features_sample_fast(vid_frame, fg_frame, boundary_ii_tt, opts, siftextractor):
-    """ appearance features of one contour in one frame, as in compute_boundary_texture_features. Returns None where the original returns NaN. """
+def _texture_haralick_input(vid_cnt, cnt_binary, max_dist, opts):
+    """ the integer image and distance passed to the (masked) Haralick features in compute_boundary_texture_features """
+    distance = np.minimum(max_dist, opts['haralick_distance'])
+    if opts['use_mask']:
+        vid_cnt_q = vid_cnt
+        if opts['masked_haralick_levels'] is not None:
+            levels = opts['masked_haralick_levels']
+            vmin, vmax = (0., 255.) if opts['use_gradient_vid'] else opts['vid_range']
+            vid_cnt_q = np.clip(np.floor((vid_cnt.astype(np.float64) - vmin) / (vmax - vmin + 1e-8) * levels),
+                                0, levels-1).astype(np.int32)
+        return vid_cnt_q, distance
+    return vid_cnt, distance
+
+
+def _texture_crop(vid_frame, fg_frame, boundary_ii_tt, opts, binary_bbox=None):
+    """ the cropped image, contour mask (intersected with the foreground) and bounding box of one sample, as in compute_boundary_texture_features. None if the crop is empty. """
+    import skimage.transform as sktform
+    cnt_binary, bbox = binary_bbox if binary_bbox is not None else contour_to_binary(boundary_ii_tt, shape=None, return_bbox=True)
+    vid_cnt = vid_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy()
+    if vid_cnt.shape[0] ==0 or vid_cnt.shape[1]==0:
+        return None
+    cnt_binary = sktform.resize(cnt_binary, output_shape=vid_cnt.shape, order=0, preserve_range=True) > 0
+    if fg_frame is not None:
+        cnt_binary = np.logical_and(cnt_binary, fg_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1])
+    max_dist = np.min(vid_cnt.shape)-1
+    if opts['use_gradient_vid']:
+        vid_cnt = sobel_frame(vid_cnt)
+    return vid_cnt, cnt_binary, bbox, max_dist
+
+
+def _texture_features_sample_fast(vid_frame, fg_frame, boundary_ii_tt, opts, siftextractor, pre=None):
+    """ appearance features of one contour in one frame, as in compute_boundary_texture_features. Returns None where the original returns NaN. pre: optional dict of precomputed 'binary_bbox', regional 'tile', 'haralick' features and 'sift' descriptor (before L2 normalisation) (e.g. by the torch variant). """
     import mahotas as mh
     import skimage.transform as sktform
 
     compute_all_feats = opts['compute_all_feats']
     use_mask = opts['use_mask']
+    pre = {} if pre is None else pre
 
     all_feats = []
     all_feats_labels = []
     all_feats_norm_bool = []
 
-    cnt_binary, bbox = contour_to_binary(boundary_ii_tt, shape=None, return_bbox=True)
-    vid_cnt = vid_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy()
-
-    if vid_cnt.shape[0] ==0 or vid_cnt.shape[1]==0:
+    crop = _texture_crop(vid_frame, fg_frame, boundary_ii_tt, opts, binary_bbox=pre.get('binary_bbox'))
+    if crop is None:
         return None
-
-    cnt_binary = sktform.resize(cnt_binary, output_shape=vid_cnt.shape, order=0, preserve_range=True) > 0
-    if fg_frame is not None:
-        cnt_binary = np.logical_and(cnt_binary, fg_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1])
-
-    max_dist = np.min(vid_cnt.shape)-1
-
-    if opts['use_gradient_vid']:
-        vid_cnt = sobel_frame(vid_cnt)
+    vid_cnt, cnt_binary, bbox, max_dist = crop
 
     if compute_all_feats==True or (compute_all_feats==False and opts['compute_intensity_feats']==True):
         mean_cnt_global = np.nanmean(vid_cnt[cnt_binary>0])
@@ -2880,11 +2930,14 @@ def _texture_features_sample_fast(vid_frame, fg_frame, boundary_ii_tt, opts, sif
         all_feats_norm_bool.append(np.hstack([False]*2))
 
     if compute_all_feats==True or (compute_all_feats==False and opts['compute_contour_intensity_feats']==True):
-        boundary_grid, (r0, c0) = _tile_uniform_radial_windows_boundary_crop(imsize=vid_frame.shape,
-                                                                             n_r=opts['n_contours'], n_theta=opts['n_angles'],
-                                                                             boundary_line=boundary_ii_tt,
-                                                                             center=None,
-                                                                             zero_angle=opts['angle_start'])
+        if 'tile' in pre:
+            boundary_grid, (r0, c0) = pre['tile']
+        else:
+            boundary_grid, (r0, c0) = _tile_uniform_radial_windows_boundary_crop(imsize=vid_frame.shape,
+                                                                                 n_r=opts['n_contours'], n_theta=opts['n_angles'],
+                                                                                 boundary_line=boundary_ii_tt,
+                                                                                 center=None,
+                                                                                 zero_angle=opts['angle_start'])
         win = (slice(r0, r0+boundary_grid.shape[0]), slice(c0, c0+boundary_grid.shape[1]))
         vid_win = vid_frame[win]
         fg_win = fg_frame[win] if fg_frame is not None else None
@@ -2908,15 +2961,11 @@ def _texture_features_sample_fast(vid_frame, fg_frame, boundary_ii_tt, opts, sif
         all_feats_norm_bool.append(np.hstack([False]*len(contour_img_feats_labels)))
 
     if compute_all_feats==True or (compute_all_feats==False and opts['compute_haralick']==True):
-        if use_mask:
-            vid_cnt_q = vid_cnt
-            if opts['masked_haralick_levels'] is not None:
-                levels = opts['masked_haralick_levels']
-                vmin, vmax = (0., 255.) if opts['use_gradient_vid'] else opts['vid_range']
-                vid_cnt_q = np.clip(np.floor((vid_cnt.astype(np.float64) - vmin) / (vmax - vmin + 1e-8) * levels),
-                                    0, levels-1).astype(np.int32)
-            cnt_texture = _masked_haralick(vid_cnt_q, cnt_binary,
-                                           distance=np.minimum(max_dist, opts['haralick_distance']))
+        har_im, har_distance = _texture_haralick_input(vid_cnt, cnt_binary, max_dist, opts)
+        if 'haralick' in pre:
+            cnt_texture = pre['haralick']
+        elif use_mask:
+            cnt_texture = _masked_haralick(har_im, cnt_binary, distance=har_distance)
         else:
             cnt_texture = mh.features.haralick(vid_cnt,
                                                ignore_zeros=False,
@@ -2947,8 +2996,11 @@ def _texture_features_sample_fast(vid_frame, fg_frame, boundary_ii_tt, opts, sif
         if use_mask:
             sift_texture = _masked_sift_descriptor(vid_cnt, cnt_binary, resize=opts['masked_sift_resize'], siftshape=siftshape)
         else:
-            vid_cnt_im = sktform.resize(vid_cnt, siftshape, preserve_range=True)
-            sift_texture = siftextractor.process_image(vid_cnt_im).ravel()
+            if 'sift' in pre:
+                sift_texture = pre['sift']
+            else:
+                vid_cnt_im = sktform.resize(vid_cnt, siftshape, preserve_range=True)
+                sift_texture = siftextractor.process_image(vid_cnt_im).ravel()
             sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
         all_feats.append(sift_texture)
         all_feats_labels.append(np.hstack(['sift_appear_%s'%(str(iii+1)) for iii in np.arange(len(sift_texture))]))
@@ -3032,8 +3084,12 @@ def compute_boundary_texture_features_fast(vid, boundaries,
 
 
 def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_frame, boundary_ii_tt,
-                                 boundary_ii_tt_plus_1, opts, siftextractor):
-    """ motion features of one contour between two frames, as in compute_boundary_motion_features. Returns None where the original returns NaN. """
+                                 boundary_ii_tt_plus_1, opts, siftextractor, pre=None, sift_inputs=None):
+    """ motion features of one contour between two frames, as in compute_boundary_motion_features. Returns None where the original returns NaN.
+
+    pre: optional dict of precomputed 'binary_bbox', regional 'tile' and 'sift' descriptors (list of 3, before L2 normalisation) (e.g. by the torch variant).
+    sift_inputs: if a list is given, the 3 resized images whose (unmasked) SIFT descriptors are needed are appended to it and the function returns before computing any feature.
+    """
     import skimage.transform as sktform
 
     compute_all_feats = opts['compute_all_feats']
@@ -3043,11 +3099,13 @@ def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_f
     n_contour_feat_bins = opts['n_contour_feat_bins']
     siftshape = opts['siftshape']
 
+    pre = {} if pre is None else pre
+
     all_feats = []
     all_feats_labels = []
     all_feats_norm_bool = []
 
-    cnt_binary, bbox = contour_to_binary(boundary_ii_tt, shape=None, return_bbox=True)
+    cnt_binary, bbox = pre['binary_bbox'] if 'binary_bbox' in pre else contour_to_binary(boundary_ii_tt, shape=None, return_bbox=True)
     flow_vid_cnt = flow_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy()
 
     if flow_vid_cnt.shape[0]==0 or flow_vid_cnt.shape[1]==0 or cnt_binary.shape[0]==0 or cnt_binary.shape[1]==0:
@@ -3064,6 +3122,15 @@ def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_f
         flow_vid_cnt_fill = np.dstack([_fill_outside_mask_nearest(flow_vid_cnt[...,ch], cnt_binary) for ch in range(flow_vid_cnt.shape[-1])])
         curl_vid_cnt = _curl_vector_flow(flow_vid_cnt_fill)[...,-1] / float(time_res)
         div_vid_cnt = _div_vector_flow(flow_vid_cnt_fill) / float(time_res)
+
+    if sift_inputs is not None:
+        # only collect the resized images for the unmasked SIFT descriptors
+        flow_vid_cnt_ = np.linalg.norm(flow_vid_cnt * pixel_res / float(time_res), axis=-1)
+        for sift_im in (flow_vid_cnt_, curl_vid_cnt, div_vid_cnt):
+            sift_im = sift_im.copy()
+            sift_im[cnt_binary>0] = 0
+            sift_inputs.append(sktform.resize(sift_im, siftshape, preserve_range=True))
+        return None
 
     if compute_all_feats==True or (compute_all_feats==False and opts['compute_global_feats']==True):
         disp = (boundary_ii_tt_plus_1 - boundary_ii_tt) * pixel_res / float(time_res)
@@ -3103,11 +3170,14 @@ def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_f
         all_feats_norm_bool.append(np.hstack([False]*2))
 
     if compute_all_feats==True or (compute_all_feats==False and opts['compute_contour_feats']==True):
-        boundary_grid, (r0, c0) = _tile_uniform_radial_windows_boundary_crop(imsize=flow_frame.shape[:-1],
-                                                                             n_r=opts['n_contours'], n_theta=opts['n_angles'],
-                                                                             boundary_line=boundary_ii_tt,
-                                                                             center=None,
-                                                                             zero_angle=opts['angle_start'])
+        if 'tile' in pre:
+            boundary_grid, (r0, c0) = pre['tile']
+        else:
+            boundary_grid, (r0, c0) = _tile_uniform_radial_windows_boundary_crop(imsize=flow_frame.shape[:-1],
+                                                                                 n_r=opts['n_contours'], n_theta=opts['n_angles'],
+                                                                                 boundary_line=boundary_ii_tt,
+                                                                                 center=None,
+                                                                                 zero_angle=opts['angle_start'])
         win = (slice(r0, r0+boundary_grid.shape[0]), slice(c0, c0+boundary_grid.shape[1]))
         flow_win = flow_frame[win]
         fg_win = fg_frame[win] if fg_frame is not None else None
@@ -3155,14 +3225,17 @@ def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_f
         sift_images = [(flow_vid_cnt_, 'sift_motion_%s'),
                        (curl_vid_cnt, 'curl_sift_%s'),
                        (div_vid_cnt, 'div_sift_%s')]
-        for sift_im, sift_label in sift_images:
+        for sift_k, (sift_im, sift_label) in enumerate(sift_images):
             if use_mask:
                 sift_texture = _masked_sift_descriptor(sift_im, cnt_binary, resize=opts['masked_sift_resize'], siftshape=siftshape)
             else:
-                sift_im = sift_im.copy()
-                sift_im[cnt_binary>0] = 0
-                sift_im = sktform.resize(sift_im, siftshape, preserve_range=True)
-                sift_texture = siftextractor.process_image(sift_im).ravel()
+                if 'sift' in pre:
+                    sift_texture = pre['sift'][sift_k]
+                else:
+                    sift_im = sift_im.copy()
+                    sift_im[cnt_binary>0] = 0
+                    sift_im = sktform.resize(sift_im, siftshape, preserve_range=True)
+                    sift_texture = siftextractor.process_image(sift_im).ravel()
                 sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
             all_feats.append(sift_texture)
             all_feats_labels.append(np.hstack([sift_label%(str(iii+1)) for iii in np.arange(len(sift_texture))]))
