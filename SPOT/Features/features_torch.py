@@ -445,7 +445,7 @@ def _cubical_cells(binary):
     return verts, edges, squares
 
 
-def ect_torch(binaries, directions, T=32, device=None, max_vertices=2**22):
+def ect_torch(binaries, directions, T=32, device=None, max_vertices=2**19):
     """ CubicalComplex(binary).complexify().ECT(directions, T) for many binary images.
 
     The bins are found as np.histogram does (bin edges from np.linspace over the [min, max] height range, the last bin
@@ -493,9 +493,16 @@ def ect_torch(binaries, directions, T=32, device=None, max_vertices=2**22):
         edges_lin[:, :, -1] = last
 
         def bins(values, sample):
-            # values (N, D) -> bin index (N, D) with edges[k] <= v < edges[k+1], last bin closed (as np.histogram)
-            e = edges_lin[sample]  # (N, D, T+1)
-            k = (e[:, :, 1:T] <= values[:, :, None]).sum(-1)
+            # values (N, D) -> bin index (N, D) with edges[k] <= v < edges[k+1], last bin closed, found as np.histogram:
+            # estimate from the bin width, then correct by one bin against the actual edges
+            f0 = first[sample]; f1 = last[sample]
+            k = torch.floor((values - f0) / (f1 - f0) * T).to(torch.int64).clamp(0, T - 1)
+            row = (sample[:, None] * D + dcol) * (T + 1)  # (N, D) offsets into the flat (B, D, T+1) edges
+            edges_flat = edges_lin.reshape(-1)
+            lo = edges_flat[row + k]
+            k = torch.where(values < lo, k - 1, k)
+            hi = edges_flat[row + k + 1]
+            k = torch.where((values >= hi) & (k != T - 1), k + 1, k)
             return k
 
         counts = torch.zeros(B * D * T, dtype=torch.int64, device=device)

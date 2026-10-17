@@ -2845,7 +2845,8 @@ def compute_boundary_morphology_features_fast(boundaries, imshape,
     (see compute_boundary_morphology_features)
     n_jobs : int
         number of parallel processes over objects (joblib, -1 = all CPUs). With n_jobs=1 the output is identical to the original function; in parallel,
-        the worker processes limit the BLAS threads, so BLAS-based statistics (the Haralick features) can differ in floating point round-off (~1e-15 relative), as the original function does under different BLAS thread settings.
+        the worker processes limit the BLAS threads, so BLAS-based statistics (the Haralick features) can differ in floating point round-off (~1e-15 relative), as the original function does under different BLAS thread settings,
+        and last-bit differences of the vectorised log / arctan2 can rarely move a contour point across a shape context histogram bin edge.
 
     Returns
     -------
@@ -3049,7 +3050,8 @@ def compute_boundary_texture_features_fast(vid, boundaries,
     (see compute_boundary_texture_features)
     n_jobs : int
         number of parallel processes over objects (joblib, -1 = all CPUs). With n_jobs=1 the output is identical to the original function; in parallel,
-        the worker processes limit the BLAS threads, so BLAS-based statistics (the Haralick features) can differ in floating point round-off (~1e-15 relative), as the original function does under different BLAS thread settings.
+        the worker processes limit the BLAS threads, so BLAS-based statistics (the Haralick features) can differ in floating point round-off (~1e-15 relative), as the original function does under different BLAS thread settings,
+        and last-bit differences of the vectorised log / arctan2 can rarely move a contour point across a shape context histogram bin edge.
 
     Returns
     -------
@@ -3293,7 +3295,8 @@ def compute_boundary_motion_features_fast(vid_flow,
     (see compute_boundary_motion_features)
     n_jobs : int
         number of parallel processes over objects (joblib, -1 = all CPUs). With n_jobs=1 the output is identical to the original function; in parallel,
-        the worker processes limit the BLAS threads, so BLAS-based statistics (the Haralick features) can differ in floating point round-off (~1e-15 relative), as the original function does under different BLAS thread settings.
+        the worker processes limit the BLAS threads, so BLAS-based statistics (the Haralick features) can differ in floating point round-off (~1e-15 relative), as the original function does under different BLAS thread settings,
+        and last-bit differences of the vectorised log / arctan2 can rarely move a contour point across a shape context histogram bin edge.
 
     Returns
     -------
