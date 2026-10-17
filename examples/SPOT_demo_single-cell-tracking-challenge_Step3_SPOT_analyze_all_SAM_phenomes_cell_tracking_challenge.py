@@ -297,6 +297,14 @@ if __name__=="__main__":
     # shape context features). Set both to False to embed the features as they are (every feature counts equally).
     sam_set_weighting = True
     sam_group_weighting = True
+    
+    # Optionally regress out confounding effects (e.g. size, intensity, batch) before embedding.
+    regress_confounders = False
+    if regress_confounders:
+        all_feats = preprocess.regress_out_confounders(all_feats.astype(np.float64), 
+                                                       feature_names=feature_names, 
+                                                       covariate_features=['equivalent_diameter', 'mean_intensity'], # covariates taken from the features
+                                                       categorical=None) # e.g. {'batch': batch_ids}
     embed_feats = preprocess.weight_sam_features(all_feats.astype(np.float64), 
                                                  feature_names, 
                                                  group_weighting=sam_group_weighting, 

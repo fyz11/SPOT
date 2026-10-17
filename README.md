@@ -121,6 +121,26 @@ metrics, metrics_labels, metrics_norm_bool = SPOT_SAM_features_torch.compute_bou
 ```
 See `benchmarks/benchmark_results.md` for timings.
 
+#### Rotation-averaged features
+Some SAM features depend on the orientation of the object in the image (e.g. SIFT orientation histograms, angular sectors of the regional windows). `SPOT.Features.augment.compute_rotation_averaged_features` rotates the video, contours and masks by `n_rotations` evenly spaced angles (multiples of 90 degrees are exact, other angles interpolate the frames; for motion the optical flow is recomputed on every rotated video), computes the features with any of the feature functions (original, `_fast` or `_torch`) and averages them. `rotation_sensitivity` reports per feature how much it changes with the angle.
+```
+import SPOT.Features.augment as SPOT_augment
+
+metrics, metrics_labels, metrics_norm_bool = SPOT_augment.compute_rotation_averaged_features(SPOT_SAM_features.compute_boundary_texture_features_fast,
+                                                                                            boundaries, vid=vid, n_rotations=4, n_jobs=-1)
+```
+
+#### Regressing out confounders
+`SPOT.Analysis.preprocessing.regress_out_confounders` removes undesired effects from the normalised features (after StandardScaler + power transform, before `weight_sam_features` / UMAP): continuous covariates such as size or intensity (cubic spline of their rank, so non-linear monotone effects are removed too) and categorical covariates such as batch or plate (mean shift, optionally also scale with `batch_scale=True`). With `reference=` (e.g. the control objects) the effects are estimated on those rows only and removed from all, so condition differences are not regressed away. `ConfoundRegressor` keeps the fitted model for new data and `confound_association` reports the remaining association per feature.
+```
+import SPOT.Analysis.preprocessing as preprocess
+
+all_feats_corrected = preprocess.regress_out_confounders(all_feats, feature_names=feature_names,
+                                                         covariate_features=['equivalent_diameter', 'mean_intensity'],
+                                                         categorical={'batch': batch_ids})
+```
+Only regress out effects that are truly undesired: on MPEG-7 x Brodatz, regressing out size also removes much of what separates the shapes.
+
 #### Masked appearance and motion features
 By default the Haralick and SIFT appearance features and the motion SIFT descriptors are computed on the bounding box crop of the object, so they also describe its outline. With `use_mask=True` they only use the pixels inside the object (optionally intersected with foreground segmentation `masks` when the contours are coarse), so appearance and motion do not double count shape.
 

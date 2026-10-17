@@ -571,3 +571,416 @@ def weight_sam_features(all_feats, feature_names, group_weighting=True, set_weig
     if return_weights:
         return out, (mean, weight)
     return out
+
+
+
+# =============================================================================
+#   Regressing out confounding covariates (object size, intensity, batch / plate)
+# =============================================================================
+def _covariate_dict(cov, n, prefix):
+    """ covariates given as None, a dict name -> (n,) array, a pandas DataFrame / Series or an (n,) / (n, k) array, as
+    an ordered dict name -> (n,) array """
+    import numpy as np
+    if cov is None:
+        return {}
+    if hasattr(cov, 'columns'):  # pandas DataFrame
+        cov = {str(c): cov[c].values for c in cov.columns}
+    elif hasattr(cov, 'name') and hasattr(cov, 'values'):  # pandas Series
+        cov = {str(cov.name) if cov.name is not None else prefix + '0': cov.values}
+    elif not isinstance(cov, dict):
+        cov = np.asarray(cov)
+        if cov.ndim == 1:
+            cov = cov[:, None]
+        cov = {'%s%d' % (prefix, j): cov[:, j] for j in range(cov.shape[1])}
+    out = {}
+    for name, v in cov.items():
+        v = np.asarray(v).ravel()
+        if len(v) != n:
+            raise ValueError('covariate %r has %d values, expected %d (one per object)' % (name, len(v), n))
+        out[name] = v
+    return out
+
+
+class ConfoundRegressor(object):
+    r""" Regress confounding / undesired effects out of (normalised) features, e.g. object size, intensity and
+    batch / plate / experiment variation.
+
+    Every feature is modelled as
+
+    .. math:: x = \beta_0 + \sum_c f_c(\mathrm{continuous}_c) + \sum_b \gamma_b[\mathrm{level}_b] + \epsilon
+
+    where each continuous covariate is mapped to [0, 1] by its rank (the empirical CDF of the fit data) and expanded in
+    a cubic B-spline basis, so that arbitrary (non)monotone nonlinear effects are captured robustly to outliers, and
+    each categorical covariate contributes one mean shift per level. All features are fitted at once by a single least
+    squares solve, so thousands of features are fast. The fitted effects are subtracted and the per-feature mean of the
+    reference rows is added back; optionally the per-level residual spread is equalised (location + scale batch
+    correction) and the result is re-standardised.
+
+    This is meant to be applied after the per-feature normalisation (StandardScaler + power transform, see
+    power_transform_and_scale_features) and before SPOT.Analysis.preprocessing.weight_sam_features / UMAP.
+
+    Parameters
+    ----------
+    spline : bool
+        expand each continuous covariate in a cubic B-spline basis (nonlinear effect). If False the (rank of the)
+        covariate enters linearly.
+    rank : bool
+        use the rank of each continuous covariate (empirical CDF of the reference rows of the fit data, in (0, 1))
+        instead of its raw value. Ranks are robust to outliers and skew; other values are interpolated against the
+        sorted reference values and clipped to their range. If False the raw (standardised) value is used.
+    n_knots : int
+        number of knots of the spline basis (sklearn.preprocessing.SplineTransformer, degree 3)
+    batch_scale : bool
+        after removing the mean effects, rescale the residuals of each level of each categorical covariate so that their
+        per-feature standard deviation equals the pooled residual standard deviation of the reference rows
+    restandardize : bool
+        z-score every output feature with the mean / standard deviation of the corrected fit data
+
+    Attributes
+    ----------
+    coef_ : (n_design, n_feats) np.array
+        least squares coefficients of the design matrix (intercept, spline bases, one-hot levels)
+    continuous_names_, categorical_names_ : list of str
+        names of the covariates seen in fit, transform must be given the same ones
+    levels_ : dict
+        name -> np.array of the levels of each categorical covariate seen in the reference rows
+    ref_mean_ : (n_feats,) np.array
+        per-feature mean of the reference rows, added back to the residuals
+    scale_ : dict
+        name -> (n_levels, n_feats) np.array of per-level residual scale factors, if batch_scale
+    mean_, std_ : (n_feats,) np.array
+        statistics of the corrected fit data used to re-standardise, if restandardize
+
+    Notes
+    -----
+    X must be finite: impute or remove NaN / inf values beforehand. If a reference mask is given (e.g. control objects)
+    the coefficients are estimated on the reference rows only and applied to every row, so differences between
+    conditions that are not explained by the covariates are preserved, even if the covariates are correlated with the
+    condition. Without a reference all rows are used and any condition effect that is correlated with a covariate is
+    (partly) removed too.
+
+    Examples
+    --------
+    >>> reg = ConfoundRegressor(batch_scale=True)
+    >>> X_corr = reg.fit_transform(X, continuous={'size': size, 'intensity': intensity},
+    ...                            categorical={'plate': plate}, reference=is_control)
+    >>> X_new_corr = reg.transform(X_new, continuous={'size': size_new, 'intensity': intensity_new},
+    ...                            categorical={'plate': plate_new})
+    """
+
+    def __init__(self, spline=True, rank=True, n_knots=6, batch_scale=False, restandardize=True):
+        self.spline = spline
+        self.rank = rank
+        self.n_knots = n_knots
+        self.batch_scale = batch_scale
+        self.restandardize = restandardize
+
+    # ---- covariate encoding ----
+    @staticmethod
+    def _finite(name, v):
+        import numpy as np
+        v = np.asarray(v, dtype=np.float64)
+        if not np.all(np.isfinite(v)):
+            raise ValueError('continuous covariate %r contains NaN / inf values' % name)
+        return v
+
+    def _fit_continuous(self, name, v):
+        import numpy as np
+        from scipy.stats import rankdata
+        from sklearn.preprocessing import SplineTransformer
+        v = self._finite(name, v)
+        # empirical CDF at the (unique) fit values, mid-ranks for ties, in (0, 1)
+        u_all = (rankdata(v) - 0.5) / len(v)
+        cdf_x, first = np.unique(v, return_index=True)
+        center, scale = v.mean(), v.std()
+        scale = scale if scale > 0 else 1.
+        spl = None
+        if self.spline:
+            u = u_all if self.rank else (v - center) / scale
+            spl = SplineTransformer(n_knots=self.n_knots, degree=3,
+                                    extrapolation='constant' if self.rank else 'linear').fit(u[:, None])
+        self._cont_[name] = (cdf_x, u_all[first], center, scale, spl)
+
+    def _encode_continuous(self, name, v):
+        import numpy as np
+        v = self._finite(name, v)
+        cdf_x, cdf_u, center, scale, spl = self._cont_[name]
+        u = np.interp(v, cdf_x, cdf_u) if self.rank else (v - center) / scale
+        if self.spline:
+            return spl.transform(u[:, None])
+        return u[:, None]
+
+    def _level_index(self, name, v):
+        import numpy as np
+        levels = self.levels_[name]
+        v = np.asarray(v)
+        unseen = set(np.unique(v).tolist()) - set(levels.tolist())
+        if unseen:
+            raise ValueError('categorical covariate %r has levels %s that were not seen in the %s data used to fit the '
+                             'confound model, their effect cannot be estimated' %
+                             (name, sorted(unseen, key=str), 'reference' if self.has_reference_ else 'fit'))
+        return np.searchsorted(levels, v)
+
+    def _covariates(self, n, cont, cat, check=True):
+        cont = _covariate_dict(cont, n, 'continuous')
+        cat = _covariate_dict(cat, n, 'categorical')
+        if check:
+            for kind, given, expected in (('continuous', cont, self.continuous_names_),
+                                          ('categorical', cat, self.categorical_names_)):
+                if sorted(given) != sorted(expected):
+                    raise ValueError('%s covariates %s do not match those used in fit %s' %
+                                     (kind, sorted(given), sorted(expected)))
+        return cont, cat
+
+    def _design(self, n, cont, cat):
+        """ design matrix [intercept, spline bases, one-hot levels without the first] and the level index of each row """
+        import numpy as np
+        blocks = [np.ones((n, 1))]
+        for name in self.continuous_names_:
+            blocks.append(self._encode_continuous(name, cont[name]))
+        idx = {}
+        for name in self.categorical_names_:
+            idx[name] = self._level_index(name, cat[name])
+            onehot = np.zeros((n, len(self.levels_[name])))
+            onehot[np.arange(n), idx[name]] = 1.
+            blocks.append(onehot[:, 1:])  # the first level is absorbed in the intercept
+        return np.hstack(blocks), idx
+
+    @staticmethod
+    def _check_X(X):
+        import numpy as np
+        X = np.asarray(X, dtype=np.float64)
+        if X.ndim != 2:
+            raise ValueError('X must be a 2D (n_objects, n_feats) array')
+        if not np.all(np.isfinite(X)):
+            raise ValueError('X contains NaN / inf values, impute or remove them before regressing out confounders')
+        return X
+
+    # ---- public api ----
+    def fit(self, X, continuous=None, categorical=None, reference=None):
+        r""" Fit the confound model.
+
+        Parameters
+        ----------
+        X : (n_objects, n_feats) np.array
+            normalised features, must be finite
+        continuous : None, (n_objects,) or (n_objects, k) np.array, dict or pandas DataFrame
+            continuous covariates, e.g. {'size': equivalent_diameter, 'intensity': mean_intensity}
+        categorical : None, (n_objects,) or (n_objects, k) np.array, dict or pandas DataFrame
+            categorical covariates, e.g. {'batch': batch_id, 'plate': plate_id}
+        reference : None or (n_objects,) bool np.array
+            rows used to estimate the coefficients (e.g. control objects); all rows if None
+
+        Returns
+        -------
+        self : ConfoundRegressor
+        """
+        import numpy as np
+        X = self._check_X(X)
+        n = len(X)
+        cont, cat = self._covariates(n, continuous, categorical, check=False)
+        ref = np.ones(n, dtype=bool) if reference is None else np.asarray(reference, dtype=bool).ravel()
+        if len(ref) != n:
+            raise ValueError('reference has %d values, expected %d' % (len(ref), n))
+        if ref.sum() < 2:
+            raise ValueError('reference must select at least 2 rows')
+        self.has_reference_ = reference is not None
+
+        self.continuous_names_ = list(cont)
+        self.categorical_names_ = list(cat)
+        self._cont_ = {}
+        for name, v in cont.items():  # rank and spline knots from the reference rows, where the effect is estimated
+            self._fit_continuous(name, np.asarray(v)[ref])
+        self.levels_ = {name: np.unique(np.asarray(v)[ref]) for name, v in cat.items()}
+
+        D, idx = self._design(n, cont, cat)
+        self.coef_ = np.linalg.lstsq(D[ref], X[ref], rcond=None)[0]
+        self.ref_mean_ = X[ref].mean(axis=0)
+        resid = X - D @ self.coef_
+
+        self.scale_ = {}
+        if self.batch_scale:
+            for name in self.categorical_names_:
+                pooled = resid[ref].std(axis=0)
+                factors = np.ones((len(self.levels_[name]), X.shape[1]))
+                for li in range(len(self.levels_[name])):
+                    sel = ref & (idx[name] == li)
+                    if sel.sum() > 1:
+                        sd = resid[sel].std(axis=0)
+                        ok = sd > 0
+                        factors[li, ok] = pooled[ok] / sd[ok]
+                self.scale_[name] = factors
+                resid = resid * factors[idx[name]]
+
+        out = resid + self.ref_mean_[None, :]
+        self.mean_ = out.mean(axis=0)
+        std = out.std(axis=0)
+        self.std_ = np.where(std > 0, std, 1.)
+        return self
+
+    def transform(self, X, continuous=None, categorical=None):
+        r""" Remove the fitted confound effects from X.
+
+        Parameters
+        ----------
+        X : (n_objects, n_feats) np.array
+            normalised features with the same columns as in fit, must be finite
+        continuous, categorical : see fit
+            the covariates of the rows of X, with the same names as in fit. Categorical levels must have been seen in
+            the (reference rows of the) fit data, else a ValueError is raised.
+
+        Returns
+        -------
+        X_corrected : (n_objects, n_feats) np.array
+        """
+        X = self._check_X(X)
+        if X.shape[1] != self.coef_.shape[1]:
+            raise ValueError('X must have %d features, got %d' % (self.coef_.shape[1], X.shape[1]))
+        cont, cat = self._covariates(len(X), continuous, categorical)
+        D, idx = self._design(len(X), cont, cat)
+        resid = X - D @ self.coef_
+        for name, factors in self.scale_.items():
+            resid = resid * factors[idx[name]]
+        out = resid + self.ref_mean_[None, :]
+        if self.restandardize:
+            out = (out - self.mean_[None, :]) / self.std_[None, :]
+        return out
+
+    def fit_transform(self, X, continuous=None, categorical=None, reference=None):
+        r""" fit then transform X, see fit and transform """
+        return self.fit(X, continuous=continuous, categorical=categorical,
+                        reference=reference).transform(X, continuous=continuous, categorical=categorical)
+
+
+def regress_out_confounders(X, continuous=None, categorical=None, feature_names=None, covariate_features=None,
+                            keep_covariate_features=True, reference=None, return_model=False, **regressor_kwargs):
+    r""" Regress confounding effects (object size, intensity, batch / plate) out of normalised features with a
+    ConfoundRegressor (rank -> cubic spline for continuous covariates, mean (and optionally scale) shift per level for
+    categorical covariates, optionally estimated on reference rows only). Generalises regressing the features on a
+    cubic spline of the rank of a single covariate.
+
+    Meant to be applied after the per-feature normalisation (StandardScaler + power transform) and before
+    SPOT.Analysis.preprocessing.weight_sam_features / UMAP.
+
+    Parameters
+    ----------
+    X : (n_objects, n_feats) np.array
+        normalised features, must be finite
+    continuous : None, array, dict or pandas DataFrame
+        extra continuous covariates not in X, see ConfoundRegressor.fit
+    categorical : None, array, dict or pandas DataFrame
+        categorical covariates, e.g. {'batch': batch_id}
+    feature_names : None or (n_feats,) array of str
+        names of the columns of X, required with covariate_features
+    covariate_features : None or list of str
+        names of columns of X used as continuous covariates, e.g. ['equivalent_diameter', 'mean_intensity']. These
+        columns are not residualised (they would become ~0) but returned unchanged, or dropped if
+        keep_covariate_features=False.
+    keep_covariate_features : bool
+        keep the covariate_features columns (unchanged) in the output, else drop them
+    reference : None or (n_objects,) bool np.array
+        rows used to estimate the confound effects (e.g. controls), so condition differences are not regressed away
+    return_model : bool
+        also return the fitted ConfoundRegressor, to correct new data with model.transform. The model acts on the
+        residualised columns only (X[:, ~np.isin(feature_names, covariate_features)]) and takes the covariate_features
+        columns as continuous covariates named by their feature name.
+    **regressor_kwargs :
+        spline, rank, n_knots, batch_scale, restandardize of ConfoundRegressor
+
+    Returns
+    -------
+    X_corrected : (n_objects, n_feats_out) np.array
+    feature_names_out : (n_feats_out,) np.array
+        only if covariate_features are given and keep_covariate_features=False
+    model : ConfoundRegressor
+        only if return_model
+    """
+    import numpy as np
+    X = np.asarray(X, dtype=np.float64)
+    cont = _covariate_dict(continuous, len(X), 'continuous')
+    is_cov = np.zeros(X.shape[1], dtype=bool)
+    if covariate_features:
+        if feature_names is None:
+            raise ValueError('feature_names is required to take covariate_features from the columns of X')
+        feature_names = np.asarray(feature_names).astype(str)
+        for name in covariate_features:
+            hits = np.flatnonzero(feature_names == name)
+            if len(hits) == 0:
+                raise ValueError('covariate feature %r is not in feature_names' % name)
+            if name in cont:
+                raise ValueError('covariate %r given both as continuous and as a covariate feature' % name)
+            cont[name] = X[:, hits[0]]
+            is_cov[hits] = True
+
+    model = ConfoundRegressor(**regressor_kwargs)
+    corrected = model.fit_transform(X[:, ~is_cov], continuous=cont or None, categorical=categorical,
+                                    reference=reference)
+    if keep_covariate_features:
+        out = X.copy()
+        out[:, ~is_cov] = corrected
+    else:
+        out = corrected
+
+    result = [out]
+    if covariate_features and not keep_covariate_features:
+        result.append(feature_names[~is_cov])
+    if return_model:
+        result.append(model)
+    return result[0] if len(result) == 1 else tuple(result)
+
+
+def confound_association(X, feature_names, continuous=None, categorical=None):
+    r""" Strength of association of every feature with every covariate, for before / after confound regression
+    diagnostics: absolute Spearman rho for continuous covariates and eta^2 (the share of the feature variance explained
+    by the level means) for categorical covariates. Both are in [0, 1], 0 = no association.
+
+    Parameters
+    ----------
+    X : (n_objects, n_feats) np.array
+        features, must be finite
+    feature_names : (n_feats,) array of str
+        names of the columns of X
+    continuous, categorical : None, array, dict or pandas DataFrame
+        covariates, see ConfoundRegressor.fit
+
+    Returns
+    -------
+    assoc : pandas DataFrame
+        one row per (feature, covariate) with columns 'feature', 'covariate', 'kind' ('continuous' / 'categorical'),
+        'measure' ('abs_spearman' / 'eta2') and 'association'
+    """
+    import numpy as np
+    import pandas as pd
+    from scipy.stats import rankdata
+    X = np.asarray(X, dtype=np.float64)
+    n = len(X)
+    feature_names = np.asarray(feature_names).astype(str)
+    cont = _covariate_dict(continuous, n, 'continuous')
+    cat = _covariate_dict(categorical, n, 'categorical')
+
+    rows = []
+    with np.errstate(invalid='ignore', divide='ignore'):
+        if cont:
+            R = rankdata(X, axis=0)
+            R = R - R.mean(axis=0)
+            R_norm = np.sqrt((R ** 2).sum(axis=0))
+        for name, v in cont.items():
+            r = rankdata(np.asarray(v, dtype=np.float64))
+            r = r - r.mean()
+            rho = (R.T @ r) / (R_norm * np.sqrt((r ** 2).sum()))
+            rows.append(pd.DataFrame({'feature': feature_names, 'covariate': name, 'kind': 'continuous',
+                                      'measure': 'abs_spearman', 'association': np.abs(rho)}))
+        Xc = X - X.mean(axis=0)
+        ss_tot = (Xc ** 2).sum(axis=0)
+        for name, v in cat.items():
+            _, inv = np.unique(np.asarray(v), return_inverse=True)
+            inv = inv.ravel()
+            counts = np.bincount(inv)
+            sums = np.zeros((len(counts), X.shape[1]))
+            np.add.at(sums, inv, Xc)
+            ss_between = (sums ** 2 / counts[:, None]).sum(axis=0)
+            rows.append(pd.DataFrame({'feature': feature_names, 'covariate': name, 'kind': 'categorical',
+                                      'measure': 'eta2', 'association': ss_between / ss_tot}))
+    if not rows:
+        return pd.DataFrame(columns=['feature', 'covariate', 'kind', 'measure', 'association'])
+    return pd.concat(rows, ignore_index=True)
