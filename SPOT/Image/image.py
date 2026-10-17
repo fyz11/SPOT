@@ -225,12 +225,12 @@ def normalize(x, pmin=2, pmax=99.8, axis=None, clip=False, eps=1e-20, dtype=np.f
 def get_img_contours(img, thresh=100, n_boundary_pts=100, return_original=False): 
     
     from skimage.measure import find_contours
-    from scipy.ndimage.morphology import binary_fill_holes
-    from skimage.morphology import binary_dilation, square
+    from scipy.ndimage import binary_fill_holes
+    from skimage.morphology import binary_dilation
     
     binary = img > thresh
     binary = binary_fill_holes(binary)
-    binary = binary_dilation(binary, square(3))
+    binary = binary_dilation(binary, np.ones((3,3), dtype=bool)) # 3x3 square footprint
     binary_cont = find_contours(binary,0)
     binary_cont = binary_cont[np.argmax([len(l) for l in binary_cont])]
     

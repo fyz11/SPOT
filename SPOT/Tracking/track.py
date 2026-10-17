@@ -892,7 +892,7 @@ def segment_organoid_bbox_track(vid,
     import skimage.transform as sktform 
     from skimage.exposure import equalize_hist, rescale_intensity, adjust_gamma
     from skimage.measure import find_contours
-    from scipy.ndimage.morphology import binary_fill_holes
+    from scipy.ndimage import binary_fill_holes
     from skimage.filters import gaussian 
     
 # =============================================================================

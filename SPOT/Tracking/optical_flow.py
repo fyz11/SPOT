@@ -54,7 +54,7 @@ def Eval_dense_optic_flow(prev, present, params):
     prev = prev.astype(np.float32)
     present = present.astype(np.float32)
 
-    if cv2.__version__.split('.')[0] == '3' or cv2.__version__.split('.')[0] == '4':
+    if int(cv2.__version__.split('.')[0]) >= 3:
         flow = cv2.calcOpticalFlowFarneback(prev, present, None, params['pyr_scale'], params['levels'], params['winsize'], params['iterations'], params['poly_n'], params['poly_sigma'], params['flags']) 
     if cv2.__version__.split('.')[0] == '2':
         flow = cv2.calcOpticalFlowFarneback(prev, present, pyr_scale=params['pyr_scale'], levels=params['levels'], winsize=params['winsize'], iterations=params['iterations'], poly_n=params['poly_n'], poly_sigma=params['poly_sigma'], flags=params['flags']) 

@@ -95,7 +95,7 @@ def read_multiimg_stack(tiffile, return_img=True):
         an (n_frames x n_slices x n_channels x n_rows x n_cols) image.
 
     """
-    from skimage.external.tifffile import TiffFile
+    from tifffile import TiffFile
 
     im_object = TiffFile(tiffile)
 
@@ -142,13 +142,13 @@ def save_multipage_tiff(np_array, savename):
     void function
     
     """    
-    from tifffile import imsave
+    from tifffile import imwrite
     import numpy as np 
     
     if np_array.max() < 1.1:
-        imsave(savename, np.uint8(255*np_array))
+        imwrite(savename, np.uint8(255*np_array))
     else:
-        imsave(savename, np.uint8(np_array))
+        imwrite(savename, np.uint8(np_array))
     
     return [] 
     
@@ -171,10 +171,9 @@ def save_imagej_vid(img, imgname):
 
     """
     
-    from skimage.external.tifffile import TiffWriter
+    from tifffile import imwrite
 
-    with TiffWriter(imgname, imagej=True) as tif:
-        tif.save(img[:,None,None,:,:,None], compress=0)
+    imwrite(imgname, img[:,None,None,:,:,None], imagej=True)
         
     return []
 

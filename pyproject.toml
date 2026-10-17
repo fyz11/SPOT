@@ -27,22 +27,24 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 
 
-# updating the requires python in line with optimesh
-requires-python = ">3.9, <3.11"
+# TensorFlow is no longer a core dependency (the detection / segmentation networks have PyTorch versions; the original
+# Keras functions need the keras-legacy extra), which allows Python 3.9 - 3.13 and NumPy 2.
+requires-python = ">=3.9, <3.14"
 dependencies = [
-    'numpy>=1.23,<2.0',
-    'contourpy<=1.2.0',
-    'tensorflow-gpu==2.10.*',
+    'numpy>=1.23',
 	'pillow',
 	'mahotas',
     'matplotlib',
     'scikit-image',
     'scikit-learn',
     'scipy',
-    'opencv-contrib-python==4.5.*',
+    'opencv-python-headless>=4.8',
 	'tqdm',
     'tifffile',
     'seaborn',
@@ -50,15 +52,20 @@ dependencies = [
     'hmmviz',
     'hmmlearn',
     'pandas',
-    'statsmodels', 
-    'umap-learn<=0.5.6',
-    'fastcluster',
+    'joblib',
+    'numexpr',
     'imagecodecs',
     'dtaidistance'
     ]
 
 [project.optional-dependencies]
 pacmap = ["pacmap"]
+analysis = ["umap-learn", "statsmodels", "fastcluster"]
+gpu = ["torch>=2.2"]
+detection = ["torch>=2.2", "h5py"]
+keras-legacy = ["tensorflow"]
+test = ["pytest"]
+docs = ["sphinx", "numpydoc", "sphinx_rtd_theme"]
 
 [project.urls]
 Homepage = "https://github.com/fyz11/SPOT"

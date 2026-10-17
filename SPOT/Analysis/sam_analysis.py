@@ -815,7 +815,7 @@ def kMeansRes(scaled_data, k, alpha_k=0.02):
     
     inertia_o = np.square((scaled_data - scaled_data.mean(axis=0))).sum()
     # fit k-means
-    kmeans = KMeans(n_clusters=k, random_state=0).fit(scaled_data)
+    kmeans = KMeans(n_clusters=k, random_state=0, n_init=10).fit(scaled_data)
     scaled_inertia = kmeans.inertia_ / inertia_o + alpha_k * k
     return scaled_inertia
 
@@ -840,7 +840,7 @@ def chooseBestKforKMeansParallel(scaled_data, k_range):
     import pandas as pd 
     
     # ans = Parallel(n_jobs=-1,verbose=10)(delayed(kMeansRes)(scaled_data, k) for k in range(k_range))
-    ans = Parallel(n_jobs=-1,verbose=10)(kMeansRes(scaled_data, k) for k in k_range)
+    ans = Parallel(n_jobs=-1,verbose=10)(kMeansRes(scaled_data, k) for k in k_range) # kMeansRes is already @delayed
     # ans = [kMeansRes(scaled_data, k) for k in range(k_range)]
     # ans = [kMeansRes(scaled_data, k) for k in range(k_range)]
     ans = list(zip(k_range,ans))
@@ -873,7 +873,7 @@ def KMeans_cluster_low_dimensional_embedding(low_dimensional_feats,
     from sklearn.cluster import KMeans
 
     # recluster with the best k 
-    clusterer = KMeans(n_clusters=k, random_state=random_state) # how many clusters? 
+    clusterer = KMeans(n_clusters=k, random_state=random_state, n_init=10) # how many clusters? 
     clusterer.fit(low_dimensional_feats)
 
     cluster_labels = clusterer.predict(low_dimensional_feats)
@@ -924,7 +924,7 @@ def KMeans_cluster_low_dimensional_embedding_with_scan(low_dimensional_feats,
         plt.show()
 
     # recluster with the best k 
-    clusterer = KMeans(n_clusters=best_k, random_state=0) # how many clusters? 
+    clusterer = KMeans(n_clusters=best_k, random_state=0, n_init=10) # how many clusters? 
     clusterer.fit(low_dimensional_feats)
 
     cluster_labels = clusterer.predict(low_dimensional_feats)
