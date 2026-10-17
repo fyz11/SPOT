@@ -176,7 +176,7 @@ class CubicalComplex:
         neighs, subtuples = _neighborhood_setup(self.img.ndim, downsample)
         binom = [special.comb(self.img.ndim, k, exact=True) for k in range(self.img.ndim+1)]
 
-        hood = np.zeros(len(neighs)+1, dtype=np.int)-1
+        hood = np.zeros(len(neighs)+1, dtype=int)-1
         cells = [[] for k in range(self.img.ndim+1)]
 
         for voxel in dcoords:
@@ -446,12 +446,12 @@ def _resample_curve(x,y,k=1, s=0, n_samples=10):
 def get_img_contours(img, thresh=0, n_boundary_pts=100, return_original=False): 
     
     from skimage.measure import find_contours
-    from scipy.ndimage.morphology import binary_fill_holes
-    from skimage.morphology import binary_dilation, square
+    from scipy.ndimage import binary_fill_holes
+    from skimage.morphology import binary_dilation
     
     binary = img > thresh
     binary = binary_fill_holes(binary)
-    binary = binary_dilation(binary, square(3))
+    binary = binary_dilation(binary, np.ones((3,3), dtype=bool)) # 3x3 square footprint
     binary_cont = find_contours(binary,0)
     binary_cont = binary_cont[np.argmax([len(l) for l in binary_cont])]
     
@@ -616,6 +616,14 @@ def zernike_moments(im, radius=1., degree=8, diameter=None):
     return zernike_feats
 
 
+def _regionprop(regprop, name, old_name):
+    """ regionprops attribute by its current scikit-image name, falling back to the old name for older scikit-image """
+    try:
+        return getattr(regprop, name)
+    except AttributeError:
+        return getattr(regprop, old_name)
+
+
 def extract_binary_regionprops(binary, pixel_xy_res=1.):
     """ Convenience function to extract variance region based shape features of a binary image 
 
@@ -658,13 +666,19 @@ def extract_binary_regionprops(binary, pixel_xy_res=1.):
     binary_pad = binary.copy()
     regprop = regionprops((binary_pad*1).astype(np.int32))[0]
     
+    # regionprops names changed in scikit-image 0.19 (old names deprecated in 0.26); use the new ones when available.
+    convex_area = _regionprop(regprop, 'area_convex', 'convex_area')
+    equivalent_diameter = _regionprop(regprop, 'equivalent_diameter_area', 'equivalent_diameter')
+    major_axis_length = _regionprop(regprop, 'axis_major_length', 'major_axis_length')
+    minor_axis_length = _regionprop(regprop, 'axis_minor_length', 'minor_axis_length')
+
     feats_nonnorm = np.hstack([ regprop.area * (pixel_xy_res)**2.,
-                                regprop.convex_area * (pixel_xy_res)**2., # area is squared.
+                                convex_area * (pixel_xy_res)**2., # area is squared.
                                 regprop.perimeter * (pixel_xy_res),
                                 # regprop.perimeter_crofton * (pixel_xy_res),
-                                regprop.equivalent_diameter * pixel_xy_res,
-                                regprop.major_axis_length * pixel_xy_res,
-                                regprop.minor_axis_length * pixel_xy_res])
+                                equivalent_diameter * pixel_xy_res,
+                                major_axis_length * pixel_xy_res,
+                                minor_axis_length * pixel_xy_res])
 
     feats_nonnorm_labels = np.hstack(['area',
                                       'convex_area',
@@ -677,14 +691,14 @@ def extract_binary_regionprops(binary, pixel_xy_res=1.):
     moments_hu = regprop.moments_hu
 
     # this doesn't require scaling, scale invariant measures. radius here is the multiplier to scale radius which by default is half the binary size.
-    moments_zernike = zernike_moments(binary_pad, radius=1, degree=8, diameter=regprop.equivalent_diameter) # default uses the image centre., radius here is a multiplier of the image only.
+    moments_zernike = zernike_moments(binary_pad, radius=1, degree=8, diameter=equivalent_diameter) # default uses the image centre., radius here is a multiplier of the image only.
 
     hu_moment_labels = np.hstack(['hu_moments_%s' %(str(h_ii+1)) for h_ii in range(len(moments_hu))])
     zernike_moment_labels = np.hstack(['zernike_moments_%s' %(str(h_ii+1)) for h_ii in range(len(moments_zernike))])
 
     feats_norm = np.hstack([4*np.pi*regprop.area/(regprop.perimeter**2.), # dimensionless
                             # np.abs(regprop.major_axis_length) / (np.abs(regprop.minor_axis_length)+1.), # dimensionless
-                            regprop.major_axis_length / (regprop.minor_axis_length+1.), # dimensionless
+                            major_axis_length / (minor_axis_length+1.), # dimensionless
                             regprop.eccentricity,
                             regprop.solidity,
                             regprop.extent,
@@ -2357,3 +2371,874 @@ def compute_boundary_motion_features(vid_flow,
 
 
 
+
+
+
+# =============================================================================
+#   Fast variants of the SAM feature functions.
+#       compute_boundary_*_features_fast return the same outputs as compute_boundary_*_features but
+#           - avoid full-frame work per object (rasterisation / region masks are done in the object's bounding box,
+#             curl and divergence once per frame instead of once per object and frame),
+#           - vectorise the Euler characteristic transform and shape context histograms,
+#           - optionally run in parallel over objects (n_jobs).
+# =============================================================================
+
+def _ect_fast(binary, directions, T=32):
+    """ Euler characteristic transform of a binary image, identical to CubicalComplex(binary).complexify().ECT(directions, T) but with the vertices, edges and squares of the cubical complex built with array operations.
+
+    Parameters
+    ----------
+    binary : (n_rows, n_cols) binary image
+        the binary shape
+    directions : (n_directions, 2) array
+        the unit directions to compute the Euler characteristic curve for
+    T : int
+        number of thresholds of each Euler characteristic curve
+
+    Returns
+    -------
+    ect : (n_directions*T,) int array
+        the concatenated Euler characteristic curves
+    """
+    on = np.asarray(binary) > 0
+    coords = np.vstack(np.nonzero(on)).T
+    verts = _centerVertices(coords)
+
+    index = np.full(on.shape, -1, dtype=np.int64)
+    index[on] = np.arange(len(coords))
+    # edges join 4-connected pixels, squares are 2x2 blocks of pixels (as CubicalComplex.complexify)
+    horz = on[:,:-1] & on[:,1:]
+    vert = on[:-1,:] & on[1:,:]
+    edges = np.vstack([np.vstack([index[:,:-1][horz], index[:,1:][horz]]).T,
+                       np.vstack([index[:-1,:][vert], index[1:,:][vert]]).T])
+    sq = on[:-1,:-1] & on[:-1,1:] & on[1:,:-1] & on[1:,1:]
+    squares = np.vstack([index[:-1,:-1][sq], index[:-1,1:][sq], index[1:,:-1][sq], index[1:,1:][sq]]).T
+
+    heights = np.sum(verts[:,None,:]*directions[None,:,:], axis=-1) # (n_verts, n_directions), same arithmetic as CubicalComplex.ECT
+    edge_heights = np.max(heights[edges], axis=1) if len(edges) > 0 else None
+    square_heights = np.max(heights[squares], axis=1) if len(squares) > 0 else None
+
+    ect = np.zeros(T*directions.shape[0], dtype=int)
+    for i in range(directions.shape[0]):
+        filtration = heights[:,i]
+        minh = np.min(filtration)
+        maxh = np.max(filtration)
+        ecc, bins = np.histogram(filtration, bins=T, range=(minh, maxh))
+        ecc = np.add(np.zeros_like(ecc), ecc)
+        if edge_heights is not None:
+            ecc = np.add(ecc, -1*np.histogram(edge_heights[:,i], bins=T, range=(minh, maxh))[0])
+        if square_heights is not None:
+            ecc = np.add(ecc, np.histogram(square_heights[:,i], bins=T, range=(minh, maxh))[0])
+        ect[i*T : (i+1)*T] = np.cumsum(ecc)
+
+    return ect
+
+
+def _shape_context_core_fast(dists, angles, n_dist=10, n_theta=16):
+    """ _shape_context_core with the per reference point 2D histogram computed by np.bincount. Same output. """
+    import numpy as np
+
+    n_pts = dists.shape[1]
+    # Using log distances
+    logbase = 1.5
+    mean_dis = np.mean(dists.flatten())
+    b = 1
+    a = (logbase ** (0.75 * n_dist) - b) / mean_dis
+
+    dists = np.floor(np.log(a * dists + b) / np.log(logbase))
+    dists = np.maximum(dists, np.resize(1, dists.shape))
+    dists = np.minimum(dists, np.resize(n_dist, dists.shape))
+
+    # Preprocessing angles
+    delta_ang = 2 * np.pi / n_theta
+    angles = np.ceil((angles + np.pi) / delta_ang)
+    angles = np.maximum(angles, np.resize(1, angles.shape))
+    angles = np.minimum(angles, np.resize(n_theta, angles.shape))
+
+    # Shape context, flattened in Fortran order of the (n_dist, n_theta) histogram
+    sc_hist = np.zeros((n_theta * n_dist, n_pts))
+    for v in range(n_pts):
+        valid = np.logical_and(np.isfinite(dists[:,v]), np.isfinite(angles[:,v]))
+        key = (dists[valid,v] - 1) + n_dist * (angles[valid,v] - 1)
+        sc_hist[:, v] = np.bincount(key.astype(np.int64), minlength=n_theta * n_dist)
+    sc_hist /= dists.shape[0]
+    return sc_hist
+
+
+def shape_context_fast(cont, n_ref=5, n_dist=5, n_theta=12, b_tangent=1, close_contour=False):
+    """ shape_context using _shape_context_core_fast. Same parameters and output as shape_context. """
+    import numpy as np
+
+    n_pt = cont.shape[0]
+    X = np.array([cont[:, 0]]).transpose()
+    Y = np.array([cont[:, 1]]).transpose()
+    # Set reference point
+    si = np.round(np.linspace(1, n_pt, n_ref)).astype(np.int32) - 1
+    V = cont[si, :]
+    vx = np.array([V[:, 0]])
+    vy = np.array([V[:, 1]])
+    # Orientations and geodesic distances between all landmark points
+    Xs = np.tile(X, (1, n_ref))
+    vxs = np.tile(vx, (n_pt, 1))
+    dXs = Xs - vxs
+    Ys = np.tile(Y, (1, n_ref))
+    vys = np.tile(vy, (n_pt, 1))
+    dYs = Ys - vys
+    dis_mat = np.sqrt(dXs**2 + dYs**2)
+    ang_mat = np.arctan2(dYs, dXs)
+
+    # Normalize shape context with the tangent orientation
+    if b_tangent:
+        Xs = np.append(np.append([X[-1]], X, axis=0), [X[0]], axis=0)
+        Ys = np.append(np.append([Y[-1]], Y, axis=0), [Y[0]], axis=0)
+
+        gX = np.gradient(Xs, axis=0)
+        gY = np.gradient(Ys, axis=0)
+
+        if not close_contour:
+            gX[1] = X[1] - X[0]
+            gX[-2] = X[-1] - X[-2]
+            gY[1] = Y[1] - Y[0]
+            gY[-2] = Y[-1] - Y[-2]
+
+        thetas = np.arctan2(gY, gX)
+        thetas = thetas[1:-1]
+        thetas = np.tile(thetas, (1, n_ref))
+
+        ang_mat = ang_mat - thetas
+        idx = np.where(ang_mat > np.pi)
+        ang_mat[idx] = ang_mat[idx] - 2 * np.pi
+        idx = np.where(ang_mat < -np.pi)
+        ang_mat[idx] = ang_mat[idx] + 2 * np.pi
+
+    sc = _shape_context_core_fast(dis_mat, ang_mat, n_dist, n_theta)
+    return sc, V, dis_mat, ang_mat
+
+
+def reorient_contour_fast(cnt, shape):
+    """ reorient_contour with the orientation computed from the rasterised shape in its bounding box instead of a full image canvas. Same output. """
+    from skimage.draw import polygon
+    from skimage.measure import regionprops
+
+    rr, cc = polygon(cnt[:,0],
+                     cnt[:,1], shape=shape)
+    r0, c0 = rr.min(), cc.min()
+    canvas = np.zeros((rr.max()-r0+1, cc.max()-c0+1), dtype=np.int32)
+    canvas[rr-r0,cc-c0] = 1
+
+    orientation = regionprops(canvas)[0].orientation
+
+    center = cnt[:-1].mean(axis=0)
+    cnt_rot = _rotate_pts(cnt[:-1,::-1], angle=orientation/np.pi*180., center=center[::-1])[:,::-1]
+
+    # relabel points i.e. sorting by angle
+    cnt_angle = np.arctan2(cnt_rot[:, 0] - center[0], cnt_rot[:,1]- center[1])
+    sort = np.argsort(cnt_angle)
+
+    cnt_rot_ = np.vstack([cnt_rot[sort[0]:],
+                          cnt_rot[:sort[0]]])
+
+    cnt_rot = np.vstack([cnt_rot_,
+                         cnt_rot_[0]])
+
+    return cnt_rot
+
+
+def _tile_uniform_radial_windows_boundary_crop(imsize, n_r, n_theta, boundary_line,
+                                               center=None,
+                                               zero_angle=None):
+    """ _tile_uniform_radial_windows_boundary computed only within the bounding box of the windows.
+
+    Returns
+    -------
+    spixels : (n_rows_crop, n_cols_crop) int32 array
+        the region labels (0 = background) in the bounding box, identical to the corresponding crop of _tile_uniform_radial_windows_boundary(imsize, ...)
+    (r0, c0) : (int, int)
+        the top left corner of the bounding box in the image
+    """
+    from skimage.draw import polygon
+
+    m, n = imsize
+
+    if center is None:
+        center = np.nanmean(boundary_line[:-1], axis=0)
+
+    edge_line_polar = np.vstack(_cart2pol(boundary_line[:,1] - center[1], boundary_line[:,0] - center[0])).T
+    edge_line_central = np.vstack(_pol2cart(edge_line_polar[:,0], edge_line_polar[:,1])).T
+
+    contour_r_internal_polar = np.array([np.linspace(0, l, n_r+1) for l in edge_line_polar[:,0]]).T
+    contour_r_internal_lines = [np.vstack(_pol2cart(l, edge_line_polar[:,1])).T for l in contour_r_internal_polar][:-1]
+
+    all_dist_lines = contour_r_internal_lines + [edge_line_central]
+    all_dist_lines = [np.vstack([ll[:,0] + center[1], ll[:,1] + center[0]]).T  for ll in all_dist_lines]
+
+    # integer polygon vertices exactly as _draw_polygon_mask
+    int_lines = [(np.clip(ll[:,1].astype(np.int32), 0, m-1), np.clip(ll[:,0].astype(np.int32), 0, n-1)) for ll in all_dist_lines]
+    r0 = int(min(yy.min() for yy, xx in int_lines)); r1 = int(max(yy.max() for yy, xx in int_lines))
+    c0 = int(min(xx.min() for yy, xx in int_lines)); c1 = int(max(xx.max() for yy, xx in int_lines))
+    crop_shape = (r1-r0+1, c1-c0+1)
+
+    all_dist_masks = []
+    for yy, xx in int_lines:
+        img = np.zeros(crop_shape, dtype=bool)
+        rr, cc = polygon(yy, xx)
+        img[rr-r0, cc-c0] = 1
+        all_dist_masks.append(img)
+    all_dist_masks = [np.logical_xor(all_dist_masks[ii+1], all_dist_masks[ii]) for ii in range(len(all_dist_masks)-1)]
+
+    XX, YY = np.meshgrid(range(c0, c1+1), range(r0, r1+1))
+    theta = np.arctan2(YY-center[0],XX-center[1])
+    theta = theta + np.pi
+
+    if zero_angle is None:
+        theta_bounds = np.linspace(0, 2*np.pi, n_theta+1)
+    else:
+        theta_bounds = np.mod(np.linspace(0, 2*np.pi, n_theta+1) + (180.-360./n_theta/2.)/180.*np.pi - zero_angle/180.*np.pi, 2*np.pi)
+
+    angle_masks_list = []
+    for ii in range(len(theta_bounds)-1):
+        if theta_bounds[ii+1] > theta_bounds[ii]:
+            mask_theta = np.logical_and( theta>=theta_bounds[ii], theta <= theta_bounds[ii+1])
+        else:
+            mask_theta = np.logical_or(np.logical_and(theta>=theta_bounds[ii], theta<=2*np.pi),
+                                        np.logical_and(theta>=0, theta<=theta_bounds[ii+1]))
+        angle_masks_list.append(mask_theta)
+
+    spixels = np.zeros(crop_shape, dtype=np.int32)
+    counter = 1
+    for ii in range(len(all_dist_masks)):
+        for jj in range(len(angle_masks_list)):
+            mask = np.logical_and(all_dist_masks[ii], angle_masks_list[jj])
+            spixels[mask] = counter
+            counter += 1
+
+    return spixels, (r0, c0)
+
+
+def _uniq_tile_regions(boundary_grid, n_contours):
+    """ the region labels of a tiling, padded as in compute_boundary_texture_features / compute_boundary_motion_features """
+    uniq_regions = np.setdiff1d(np.unique(boundary_grid), 0)
+    if len(uniq_regions) != 3 and len(uniq_regions) < n_contours:
+        uniq_regions = np.hstack([uniq_regions, [uniq_regions[-1]]*(n_contours-len(uniq_regions))])
+    return uniq_regions
+
+
+def _run_fast_feature_chunks(chunk_fn, n_obj, n_jobs, args):
+    """ run chunk_fn(obj_index_array, *args) over chunks of objects (in parallel with joblib if n_jobs != 1) and return the per object results in object order. """
+    from tqdm import tqdm
+    from joblib import Parallel, delayed, effective_n_jobs
+
+    n_jobs = effective_n_jobs(n_jobs)
+    if n_obj == 0:
+        return []
+    if n_jobs == 1:
+        chunks = [np.array([ii]) for ii in range(n_obj)]
+        results = [chunk_fn(c, *args) for c in tqdm(chunks)]
+    else:
+        chunks = [c for c in np.array_split(np.arange(n_obj), min(n_obj, 4*n_jobs)) if len(c) > 0]
+        results = Parallel(n_jobs=n_jobs, backend='loky')(delayed(chunk_fn)(c, *args) for c in tqdm(chunks))
+    return [obj for part in results for obj in part]
+
+
+def _assemble_fast_features(per_obj, n_obj, n_time):
+    """ (n_obj, n_time, n_feat) array, labels and normalised flags from per object lists of None or (feats, labels, norm) """
+    out_feat_labels = []
+    out_feat_labels_norm = []
+    for obj in per_obj:
+        for val in obj:
+            if val is not None:
+                out_feat_labels, out_feat_labels_norm = val[1], val[2]
+                break
+        if len(out_feat_labels) > 0:
+            break
+    out_array = np.zeros((n_obj, n_time, len(out_feat_labels)))
+    for ii in range(n_obj):
+        for jj in range(n_time):
+            val = per_obj[ii][jj]
+            if val is None:
+                out_array[ii,jj] = np.nan
+            else:
+                out_array[ii,jj] = val[0]
+    return out_array, out_feat_labels, out_feat_labels_norm
+
+
+def _morphology_features_sample_fast(boundary_ii_tt, imshape, opts):
+    """ shape features of one contour, as in compute_boundary_morphology_features """
+    from sklearn.metrics.pairwise import pairwise_distances
+
+    all_feats_compute = opts['all_feats_compute']
+    pixel_xy_res = opts['pixel_xy_res']
+
+    boundary_ii_tt = reorient_contour_fast(boundary_ii_tt, imshape)
+
+    all_feats = []
+    all_feats_labels = []
+    all_feats_norm_bool = []
+
+    if all_feats_compute==True or (all_feats_compute==False and opts['contour_curve_feats']==True):
+        smooth_curve, deriv_curve, curvature = curvature_splines(boundary_ii_tt[:,1]*pixel_xy_res,
+                                                                 y=boundary_ii_tt[:,0]*pixel_xy_res,
+                                                                 k=opts['curve_order'],
+                                                                 error=opts['curve_err']*pixel_xy_res)
+        curvature_feats = np.hstack([ np.max(curvature),
+                                      np.min(curvature),
+                                      np.mean(curvature),
+                                      np.mean(np.abs(curvature)),
+                                      np.std(curvature),
+                                      np.mean((curvature-np.mean(curvature))**3) / (np.std(curvature)**1.5 + 1e-8),
+                                      np.mean((curvature-np.mean(curvature))**4) / (np.std(curvature)**4 + 1e-8)])
+        curvature_feats_labels = np.hstack(['max_curvature',
+                                            'min_curvature',
+                                            'mean_curvature',
+                                            'mean_abs_curvature',
+                                            'std_curvature',
+                                            'mean_skew_curvature',
+                                            'mean_kurtosis_curvature'])
+        all_feats.append(curvature_feats)
+        all_feats_labels.append(curvature_feats_labels)
+        all_feats_norm_bool.append(np.hstack([False]*len(curvature_feats)))
+
+    if all_feats_compute==True or (all_feats_compute==False and opts['geom_features']==True):
+        cnt_centroid_distances = np.linalg.norm(boundary_ii_tt[:-1]*pixel_xy_res - boundary_ii_tt[:-1].mean(axis=0)[None,:]*pixel_xy_res, axis=-1)
+
+        max_cell_radius = np.max(cnt_centroid_distances)
+        cell_radius_ratio = np.max(cnt_centroid_distances) / (np.min(cnt_centroid_distances) + 1)
+        mean_cell_radius = np.mean(cnt_centroid_distances)
+        cv_cell_radius = np.std(cnt_centroid_distances) / mean_cell_radius
+
+        chordal_distances = pairwise_distances(boundary_ii_tt)
+        max_span = chordal_distances.max()
+
+        chordal_hist, _ = np.histogram(chordal_distances[np.triu_indices(len(chordal_distances))]/max_span, range=(0,1), bins=8)
+        chordal_hist = chordal_hist/float(np.sum(chordal_hist))
+
+        geom_feats_nonnorm = np.hstack([max_cell_radius,
+                                        mean_cell_radius,
+                                        cv_cell_radius,
+                                        max_span])
+        all_feats.append(geom_feats_nonnorm)
+        all_feats_labels.append(np.hstack(['max_centroid_distance',
+                                           'mean_centroid_distance',
+                                           'std_mean_centroid_distance_ratio',
+                                           'max_chordal_distance']))
+        all_feats_norm_bool.append(np.hstack([False]*len(geom_feats_nonnorm)))
+
+        geom_feats_norm = np.hstack([cell_radius_ratio,
+                                     chordal_hist])
+        all_feats.append(geom_feats_norm)
+        all_feats_labels.append(np.hstack(['max_min_centroid_distance_ratio',
+                                           np.hstack(['chordal_hist_bin_%s'%(str(bin_i+1)) for bin_i in np.arange(len(chordal_hist))])]))
+        all_feats_norm_bool.append(np.hstack([True]*len(geom_feats_norm)))
+
+    cnt_binary = None
+    if all_feats_compute==True or (all_feats_compute==False and opts['morph_features']==True):
+        cnt_binary = contour_to_binary(boundary_ii_tt, shape=None)
+        cnt_binary_feats_nonnorm, cnt_binary_feats_norm = extract_binary_regionprops(cnt_binary, pixel_xy_res=pixel_xy_res)
+
+        cnt_binary_feats_nonnorm, cnt_binary_feats_nonnorm_labels = cnt_binary_feats_nonnorm
+        cnt_binary_feats_norm, cnt_binary_feats_norm_labels = cnt_binary_feats_norm
+
+        all_feats.append(cnt_binary_feats_nonnorm)
+        all_feats_labels.append(cnt_binary_feats_nonnorm_labels)
+        all_feats_norm_bool.append(np.hstack([False]*len(cnt_binary_feats_nonnorm)))
+
+        all_feats.append(cnt_binary_feats_norm)
+        all_feats_labels.append(cnt_binary_feats_norm_labels)
+        all_feats_norm_bool.append(np.hstack([True]*len(cnt_binary_feats_norm_labels)))
+
+    if all_feats_compute==True or (all_feats_compute==False and opts['fourier_features']==True):
+        cnt_fourier = compute_fft_boundary_feats([boundary_ii_tt], pixel_xy_res=pixel_xy_res).ravel()
+        cnt_fourier = np.abs(cnt_fourier[1:len(cnt_fourier)//2])
+        cnt_fourier = np.abs(cnt_fourier)**(0.2)
+        cnt_fourier = cnt_fourier / (np.linalg.norm(cnt_fourier) + 1e-8)
+
+        all_feats.append(cnt_fourier)
+        all_feats_labels.append(np.hstack(['Fourier_%s' %(str(f_ii+1)) for f_ii in range(len(cnt_fourier))]))
+        all_feats_norm_bool.append(np.hstack([True]*len(cnt_fourier)))
+
+    if all_feats_compute==True or (all_feats_compute==False and opts['ect_features']==True):
+        # as in the original, the binary comes from the morphological features block
+        ect_feat = _ect_fast(cnt_binary, _regular_directions(36, dims=2), T=32)
+
+        all_feats.append(ect_feat)
+        all_feats_labels.append(np.hstack(['ECT_%s' %(str(f_ii+1)) for f_ii in range(len(ect_feat))]))
+        all_feats_norm_bool.append(np.hstack([True]*len(ect_feat)))
+
+    if all_feats_compute==True or (all_feats_compute==False and opts['shape_context_features']==True):
+        scm_feats = shape_context_fast(boundary_ii_tt*pixel_xy_res,
+                                       n_ref=opts['n_ref_pts_scm'],
+                                       n_dist=5,
+                                       n_theta=12, b_tangent=1)[0].flatten(order='F')
+        if opts['norm_scm']:
+            scm_feats = scm_feats / (np.linalg.norm(scm_feats, ord=2) + 1e-8)
+
+        all_feats.append(scm_feats)
+        all_feats_labels.append(np.hstack(['Shape_Context_%s' %(str(f_ii+1)) for f_ii in range(len(scm_feats))]))
+        all_feats_norm_bool.append(np.hstack([True]*len(scm_feats)))
+
+    return np.hstack(all_feats), np.hstack(all_feats_labels), np.hstack(all_feats_norm_bool)
+
+
+def _morphology_features_chunk_fast(obj_ids, boundaries, imshape, frames, opts):
+    out = []
+    for b_ii in obj_ids:
+        descriptors = []
+        for tt in frames:
+            boundary_ii_tt = boundaries[b_ii][tt]
+            if np.isnan(boundary_ii_tt[0][0]) == True:
+                descriptors.append(None)
+            else:
+                descriptors.append(_morphology_features_sample_fast(boundary_ii_tt, imshape, opts))
+        out.append(descriptors)
+    return out
+
+
+def compute_boundary_morphology_features_fast(boundaries, imshape,
+                                              all_feats_compute=True,
+                                              contour_curve_feats=True,
+                                              curve_order=4, curve_err=1.,
+                                              geom_features=True,
+                                              morph_features=True,
+                                              fourier_features=True,
+                                              ect_features=True,
+                                              shape_context_features=True,
+                                              norm_scm=True,
+                                              n_ref_pts_scm=5,
+                                              pixel_xy_res=1.,
+                                              timesample=None,
+                                              n_jobs=1):
+    """ Fast variant of compute_boundary_morphology_features with the same parameters and outputs.
+
+    The contour reorientation rasterises the shape in its bounding box instead of a full image canvas, the Euler characteristic transform builds its cubical complex with array operations and the shape context histograms use np.bincount. Objects can be processed in parallel.
+
+    Parameters
+    ----------
+    (see compute_boundary_morphology_features)
+    n_jobs : int
+        number of parallel processes over objects (joblib, -1 = all CPUs). With n_jobs=1 the output is identical to the original function; in parallel,
+        the worker processes limit the BLAS threads, so BLAS-based statistics (the Haralick features) can differ in floating point round-off (~1e-15 relative), as the original function does under different BLAS thread settings.
+
+    Returns
+    -------
+    out_array : (n_organoids, n_frames, n_features) array
+        the concatenated shape features for every organoid in every timepoint
+    out_feat_labels : (n_features,) str array
+        the names of each feature
+    out_feat_labels_norm : (n_features,) str array
+        a boolean vector where 1 or True means the feature is normalised i.e. dimensionless.
+    """
+    if timesample is None:
+        timesample = 1
+    if all_feats_compute==False and ect_features==True and morph_features==False:
+        raise ValueError('ect_features requires morph_features=True, as in compute_boundary_morphology_features')
+    frames = np.arange(0, boundaries.shape[1], timesample)
+    opts = dict(all_feats_compute=all_feats_compute, contour_curve_feats=contour_curve_feats, curve_order=curve_order,
+                curve_err=curve_err, geom_features=geom_features, morph_features=morph_features,
+                fourier_features=fourier_features, ect_features=ect_features,
+                shape_context_features=shape_context_features, norm_scm=norm_scm, n_ref_pts_scm=n_ref_pts_scm,
+                pixel_xy_res=pixel_xy_res)
+    per_obj = _run_fast_feature_chunks(_morphology_features_chunk_fast, len(boundaries), n_jobs,
+                                       (boundaries, imshape, frames, opts))
+    return _assemble_fast_features(per_obj, len(boundaries), len(frames))
+
+
+def _texture_features_sample_fast(vid_frame, fg_frame, boundary_ii_tt, opts, siftextractor):
+    """ appearance features of one contour in one frame, as in compute_boundary_texture_features. Returns None where the original returns NaN. """
+    import mahotas as mh
+    import skimage.transform as sktform
+
+    compute_all_feats = opts['compute_all_feats']
+    use_mask = opts['use_mask']
+
+    all_feats = []
+    all_feats_labels = []
+    all_feats_norm_bool = []
+
+    cnt_binary, bbox = contour_to_binary(boundary_ii_tt, shape=None, return_bbox=True)
+    vid_cnt = vid_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy()
+
+    if vid_cnt.shape[0] ==0 or vid_cnt.shape[1]==0:
+        return None
+
+    cnt_binary = sktform.resize(cnt_binary, output_shape=vid_cnt.shape, order=0, preserve_range=True) > 0
+    if fg_frame is not None:
+        cnt_binary = np.logical_and(cnt_binary, fg_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1])
+
+    max_dist = np.min(vid_cnt.shape)-1
+
+    if opts['use_gradient_vid']:
+        vid_cnt = sobel_frame(vid_cnt)
+
+    if compute_all_feats==True or (compute_all_feats==False and opts['compute_intensity_feats']==True):
+        mean_cnt_global = np.nanmean(vid_cnt[cnt_binary>0])
+        std_cnt_global = np.nanstd(vid_cnt[cnt_binary>0])
+
+        all_feats.append(np.hstack([mean_cnt_global,
+                                    std_cnt_global]))
+        all_feats_labels.append(np.hstack(['mean_intensity',
+                                           'stddev_intensity']))
+        all_feats_norm_bool.append(np.hstack([False]*2))
+
+    if compute_all_feats==True or (compute_all_feats==False and opts['compute_contour_intensity_feats']==True):
+        boundary_grid, (r0, c0) = _tile_uniform_radial_windows_boundary_crop(imsize=vid_frame.shape,
+                                                                             n_r=opts['n_contours'], n_theta=opts['n_angles'],
+                                                                             boundary_line=boundary_ii_tt,
+                                                                             center=None,
+                                                                             zero_angle=opts['angle_start'])
+        win = (slice(r0, r0+boundary_grid.shape[0]), slice(c0, c0+boundary_grid.shape[1]))
+        vid_win = vid_frame[win]
+        fg_win = fg_frame[win] if fg_frame is not None else None
+        uniq_regions = _uniq_tile_regions(boundary_grid, opts['n_contours'])
+
+        contour_img_feats = []
+        contour_img_feats_labels = []
+        for reg in uniq_regions:
+            reg_mask = boundary_grid==reg
+            if fg_win is not None:
+                reg_mask = np.logical_and(reg_mask, fg_win)
+
+            contour_img_feats.append(np.nanmean(vid_win[reg_mask>0]))
+            contour_img_feats.append(np.nanstd(vid_win[reg_mask>0]))
+
+            contour_img_feats_labels.append('mean_intensity_region_%s' %(str(reg).zfill(3)))
+            contour_img_feats_labels.append('stddev_intensity_region_%s' %(str(reg).zfill(3)))
+
+        all_feats.append(np.hstack(contour_img_feats))
+        all_feats_labels.append(np.hstack(contour_img_feats_labels))
+        all_feats_norm_bool.append(np.hstack([False]*len(contour_img_feats_labels)))
+
+    if compute_all_feats==True or (compute_all_feats==False and opts['compute_haralick']==True):
+        if use_mask:
+            vid_cnt_q = vid_cnt
+            if opts['masked_haralick_levels'] is not None:
+                levels = opts['masked_haralick_levels']
+                vmin, vmax = (0., 255.) if opts['use_gradient_vid'] else opts['vid_range']
+                vid_cnt_q = np.clip(np.floor((vid_cnt.astype(np.float64) - vmin) / (vmax - vmin + 1e-8) * levels),
+                                    0, levels-1).astype(np.int32)
+            cnt_texture = _masked_haralick(vid_cnt_q, cnt_binary,
+                                           distance=np.minimum(max_dist, opts['haralick_distance']))
+        else:
+            cnt_texture = mh.features.haralick(vid_cnt,
+                                               ignore_zeros=False,
+                                               preserve_haralick_bug=False,
+                                               compute_14th_feature=False,
+                                               return_mean=True,
+                                               return_mean_ptp=False,
+                                               use_x_minus_y_variance=False,
+                                               distance=np.minimum(max_dist, opts['haralick_distance']))
+        all_feats.append(cnt_texture)
+        all_feats_labels.append(np.hstack(['angular_second_moment',
+                                           'contrast',
+                                           'correlation',
+                                           'sum_squares_variance',
+                                           'inv_diff_moment',
+                                           'sum_average',
+                                           'sum_variance',
+                                           'sum_entropy',
+                                           'entropy',
+                                           'diff_variance',
+                                           'diff_entropy',
+                                           'info_measure_correlation_1',
+                                           'info_measure_correlation_2']))
+        all_feats_norm_bool.append(np.hstack([False]*len(cnt_texture)))
+
+    if compute_all_feats==True or (compute_all_feats==False and opts['compute_sift']==True):
+        siftshape = opts['siftshape']
+        if use_mask:
+            sift_texture = _masked_sift_descriptor(vid_cnt, cnt_binary, resize=opts['masked_sift_resize'], siftshape=siftshape)
+        else:
+            vid_cnt_im = sktform.resize(vid_cnt, siftshape, preserve_range=True)
+            sift_texture = siftextractor.process_image(vid_cnt_im).ravel()
+            sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
+        all_feats.append(sift_texture)
+        all_feats_labels.append(np.hstack(['sift_appear_%s'%(str(iii+1)) for iii in np.arange(len(sift_texture))]))
+        all_feats_norm_bool.append(np.hstack([True]*len(sift_texture)))
+
+    return np.hstack(all_feats), np.hstack(all_feats_labels), np.hstack(all_feats_norm_bool)
+
+
+def _texture_features_chunk_fast(obj_ids, vid, boundaries, masks, frames, opts):
+    siftextractor = SingleSiftExtractor(opts['siftshape'][0])
+    out = [[None]*len(frames) for b_ii in obj_ids]
+    for jj, tt in enumerate(frames):
+        fg_frame = np.asarray(masks[tt]) > 0 if (opts['use_mask'] and masks is not None) else None
+        for kk, b_ii in enumerate(obj_ids):
+            boundary_ii_tt = boundaries[b_ii][tt]
+            if np.isnan(boundary_ii_tt[0][0]) == False:
+                out[kk][jj] = _texture_features_sample_fast(vid[tt], fg_frame, boundary_ii_tt, opts, siftextractor)
+    return out
+
+
+def compute_boundary_texture_features_fast(vid, boundaries,
+                                           use_gradient_vid=False,
+                                           compute_all_feats =True,
+                                           compute_intensity_feats=True,
+                                           compute_contour_intensity_feats=True,
+                                           n_contours=3,
+                                           n_angles=1,
+                                           angle_start=None,
+                                           compute_sift=True,
+                                           siftshape=(64,64),
+                                           compute_haralick=True,
+                                           haralick_distance=15,
+                                           timesample=None,
+                                           use_mask=False,
+                                           masked_sift_resize='cap',
+                                           masks=None,
+                                           masked_haralick_levels=8,
+                                           masked_haralick_range=None,
+                                           n_jobs=1):
+    """ Fast variant of compute_boundary_texture_features with the same parameters and outputs.
+
+    The regional intensity windows are built in the bounding box of the object instead of the full frame and the SIFT extractor is created once. Objects can be processed in parallel.
+
+    Parameters
+    ----------
+    (see compute_boundary_texture_features)
+    n_jobs : int
+        number of parallel processes over objects (joblib, -1 = all CPUs). With n_jobs=1 the output is identical to the original function; in parallel,
+        the worker processes limit the BLAS threads, so BLAS-based statistics (the Haralick features) can differ in floating point round-off (~1e-15 relative), as the original function does under different BLAS thread settings.
+
+    Returns
+    -------
+    out_array : (n_organoids, n_frames, n_features) array
+        the concatenated appearance features for every organoid in every timepoint
+    out_feat_labels : (n_features,) str array
+        the names of each feature
+    out_feat_labels_norm : (n_features,) str array
+        a boolean vector where 1 or True means the feature is normalised i.e. dimensionless.
+    """
+    if timesample is None:
+        timesample = 1
+    vid_range = None
+    if use_mask and masked_haralick_levels is not None:
+        if masked_haralick_range is not None:
+            vid_range = masked_haralick_range
+        elif np.issubdtype(np.asarray(vid).dtype, np.integer):
+            vid_range = (np.iinfo(np.asarray(vid).dtype).min, np.iinfo(np.asarray(vid).dtype).max)
+        else:
+            vid_range = (float(np.nanmin(vid)), float(np.nanmax(vid)))
+    frames = np.arange(0, boundaries.shape[1], timesample)
+    opts = dict(use_gradient_vid=use_gradient_vid, compute_all_feats=compute_all_feats,
+                compute_intensity_feats=compute_intensity_feats,
+                compute_contour_intensity_feats=compute_contour_intensity_feats, n_contours=n_contours,
+                n_angles=n_angles, angle_start=angle_start, compute_sift=compute_sift, siftshape=siftshape,
+                compute_haralick=compute_haralick, haralick_distance=haralick_distance, use_mask=use_mask,
+                masked_sift_resize=masked_sift_resize, masked_haralick_levels=masked_haralick_levels,
+                vid_range=vid_range)
+    per_obj = _run_fast_feature_chunks(_texture_features_chunk_fast, len(boundaries), n_jobs,
+                                       (vid, boundaries, masks, frames, opts))
+    return _assemble_fast_features(per_obj, len(boundaries), len(frames))
+
+
+def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_frame, boundary_ii_tt,
+                                 boundary_ii_tt_plus_1, opts, siftextractor):
+    """ motion features of one contour between two frames, as in compute_boundary_motion_features. Returns None where the original returns NaN. """
+    import skimage.transform as sktform
+
+    compute_all_feats = opts['compute_all_feats']
+    use_mask = opts['use_mask']
+    pixel_res = opts['pixel_res']
+    time_res = opts['time_res']
+    n_contour_feat_bins = opts['n_contour_feat_bins']
+    siftshape = opts['siftshape']
+
+    all_feats = []
+    all_feats_labels = []
+    all_feats_norm_bool = []
+
+    cnt_binary, bbox = contour_to_binary(boundary_ii_tt, shape=None, return_bbox=True)
+    flow_vid_cnt = flow_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy()
+
+    if flow_vid_cnt.shape[0]==0 or flow_vid_cnt.shape[1]==0 or cnt_binary.shape[0]==0 or cnt_binary.shape[1]==0:
+        return None
+
+    curl_vid_cnt = curl_vid_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy()
+    div_vid_cnt = div_vid_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy()
+
+    cnt_binary = sktform.resize(cnt_binary, output_shape=flow_vid_cnt.shape[:-1], order=0, preserve_range=True) > 0
+    if fg_frame is not None:
+        cnt_binary = np.logical_and(cnt_binary, fg_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1])
+
+    if use_mask:
+        flow_vid_cnt_fill = np.dstack([_fill_outside_mask_nearest(flow_vid_cnt[...,ch], cnt_binary) for ch in range(flow_vid_cnt.shape[-1])])
+        curl_vid_cnt = _curl_vector_flow(flow_vid_cnt_fill)[...,-1] / float(time_res)
+        div_vid_cnt = _div_vector_flow(flow_vid_cnt_fill) / float(time_res)
+
+    if compute_all_feats==True or (compute_all_feats==False and opts['compute_global_feats']==True):
+        disp = (boundary_ii_tt_plus_1 - boundary_ii_tt) * pixel_res / float(time_res)
+        mean_disp_speed = np.linalg.norm( np.nanmean(boundary_ii_tt_plus_1[:-1], axis=0) -
+                                          np.nanmean(boundary_ii_tt[:-1], axis=0), axis=-1) * pixel_res / float(time_res)
+        std_disp_speed = np.nanstd(np.linalg.norm(disp, axis=-1))
+
+        all_feats.append(np.hstack([mean_disp_speed,std_disp_speed]))
+        all_feats_labels.append(np.hstack(['mean_speed_global',
+                                           'stddev_speed_global']))
+        all_feats_norm_bool.append(np.hstack([False]*2))
+
+        flow_vid_cnt_ = flow_vid_cnt.copy() * pixel_res / float(time_res)
+        mean_disp_speed_flow = np.nanmean( np.linalg.norm(flow_vid_cnt_[cnt_binary>0], axis=-1))
+        std_disp_speed_flow = np.nanstd( np.linalg.norm(flow_vid_cnt_[cnt_binary>0], axis=-1) )
+
+        all_feats.append(np.hstack([mean_disp_speed_flow,
+                                    std_disp_speed_flow]))
+        all_feats_labels.append(np.hstack(['mean_speed_global_flow',
+                                           'stddev_speed_global_flow']))
+        all_feats_norm_bool.append(np.hstack([False]*2))
+
+        mean_curl_mag = np.nanmean( curl_vid_cnt[cnt_binary>0])
+        std_curl_mag = np.nanstd( curl_vid_cnt[cnt_binary>0])
+        all_feats.append(np.hstack([mean_curl_mag,
+                                    std_curl_mag]))
+        all_feats_labels.append(np.hstack(['mean_curl_global_flow',
+                                           'stddev_curl_global_flow']))
+        all_feats_norm_bool.append(np.hstack([False]*2))
+
+        mean_div_mag = np.nanmean( div_vid_cnt[cnt_binary>0])
+        std_div_mag = np.nanstd( div_vid_cnt[cnt_binary>0])
+        all_feats.append(np.hstack([mean_div_mag,
+                                    std_div_mag]))
+        all_feats_labels.append(np.hstack(['mean_divergence_global_flow',
+                                           'stddev_divergence_global_flow']))
+        all_feats_norm_bool.append(np.hstack([False]*2))
+
+    if compute_all_feats==True or (compute_all_feats==False and opts['compute_contour_feats']==True):
+        boundary_grid, (r0, c0) = _tile_uniform_radial_windows_boundary_crop(imsize=flow_frame.shape[:-1],
+                                                                             n_r=opts['n_contours'], n_theta=opts['n_angles'],
+                                                                             boundary_line=boundary_ii_tt,
+                                                                             center=None,
+                                                                             zero_angle=opts['angle_start'])
+        win = (slice(r0, r0+boundary_grid.shape[0]), slice(c0, c0+boundary_grid.shape[1]))
+        flow_win = flow_frame[win]
+        fg_win = fg_frame[win] if fg_frame is not None else None
+        uniq_regions = _uniq_tile_regions(boundary_grid, opts['n_contours'])
+
+        for reg in uniq_regions:
+            reg_mask = boundary_grid==reg
+            if fg_win is not None:
+                reg_mask = np.logical_and(reg_mask, fg_win)
+
+            flow_reg_mask = flow_win[reg_mask>0] * pixel_res / float(time_res)
+
+            if len(flow_reg_mask) > n_contour_feat_bins:
+                flow_reg_mask_mag = np.linalg.norm(flow_reg_mask, axis=-1)
+                lower_bin = np.nanmean(flow_reg_mask_mag) - np.nanstd(flow_reg_mask_mag) * opts['cnt_sigma']
+                upper_bin = np.nanmean(flow_reg_mask_mag) + np.nanstd(flow_reg_mask_mag) * opts['cnt_sigma']
+                x_grid = np.linspace(lower_bin, upper_bin, n_contour_feat_bins)
+                if np.sum(flow_reg_mask_mag>1e-3) > 0 and np.nanstd(flow_reg_mask_mag) < 1e-8:
+                    hist_flow = np.ones(n_contour_feat_bins) / float(n_contour_feat_bins)
+                elif np.sum(flow_reg_mask_mag>1e-3) > 0:
+                    hist_flow = _kde_scipy(flow_reg_mask_mag, x_grid, bandwidth=.2)
+                    hist_flow = hist_flow / float(np.sum(hist_flow) + 1e-8)
+                else:
+                    hist_flow = np.zeros(n_contour_feat_bins)
+            else:
+                hist_flow = np.zeros(n_contour_feat_bins)
+
+            all_feats.append(hist_flow)
+            all_feats_labels.append(['hist_bin_%d_region_%s' %(bbb+1, str(reg).zfill(3)) for bbb in range(len(hist_flow))])
+            all_feats_norm_bool.append(np.hstack([True]*len(hist_flow)))
+
+            mean_disp_speed_flow_region = np.nanmean( np.linalg.norm(flow_reg_mask, axis=-1))
+            std_disp_speed_flow_region = np.nanstd( np.linalg.norm(flow_reg_mask, axis=-1) )
+
+            all_feats.append(np.hstack([mean_disp_speed_flow_region,
+                                        std_disp_speed_flow_region]))
+            all_feats_labels.append(np.hstack(['mean_speed_flow_region_%d' %(reg),
+                                               'stddev_speed_flow_region%d' %(reg)]))
+            all_feats_norm_bool.append(np.hstack([False]*2))
+
+    if compute_all_feats==True or (compute_all_feats==False and opts['compute_sift_feats']==True):
+        flow_vid_cnt_ = flow_vid_cnt * pixel_res / float(time_res)
+        flow_vid_cnt_ = np.linalg.norm(flow_vid_cnt_, axis=-1)
+
+        sift_images = [(flow_vid_cnt_, 'sift_motion_%s'),
+                       (curl_vid_cnt, 'curl_sift_%s'),
+                       (div_vid_cnt, 'div_sift_%s')]
+        for sift_im, sift_label in sift_images:
+            if use_mask:
+                sift_texture = _masked_sift_descriptor(sift_im, cnt_binary, resize=opts['masked_sift_resize'], siftshape=siftshape)
+            else:
+                sift_im = sift_im.copy()
+                sift_im[cnt_binary>0] = 0
+                sift_im = sktform.resize(sift_im, siftshape, preserve_range=True)
+                sift_texture = siftextractor.process_image(sift_im).ravel()
+                sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
+            all_feats.append(sift_texture)
+            all_feats_labels.append(np.hstack([sift_label%(str(iii+1)) for iii in np.arange(len(sift_texture))]))
+            all_feats_norm_bool.append(np.hstack([True]*len(sift_texture)))
+
+    return np.hstack(all_feats), np.hstack(all_feats_labels), np.hstack(all_feats_norm_bool)
+
+
+def _motion_features_chunk_fast(obj_ids, vid_flow, boundaries, masks, frames, opts):
+    siftextractor = SingleSiftExtractor(opts['siftshape'][0])
+    out = [[None]*len(frames) for b_ii in obj_ids]
+    for jj, tt in enumerate(frames):
+        todo = [kk for kk, b_ii in enumerate(obj_ids)
+                if np.isnan(boundaries[b_ii][tt][0][0]) == False and np.isnan(boundaries[b_ii][tt+1][0][0]) == False]
+        if len(todo) == 0:
+            continue
+        # curl and divergence once per frame
+        flow_frame = np.asarray(vid_flow[tt]).copy()
+        curl_vid_frame = _curl_vector_flow(flow_frame)[...,-1] / float(opts['time_res'])
+        div_vid_frame = _div_vector_flow(flow_frame) / float(opts['time_res'])
+        fg_frame = np.asarray(masks[tt]) > 0 if (opts['use_mask'] and masks is not None) else None
+        for kk in todo:
+            b_ii = obj_ids[kk]
+            out[kk][jj] = _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_frame,
+                                                       boundaries[b_ii][tt], boundaries[b_ii][tt+1], opts,
+                                                       siftextractor)
+    return out
+
+
+def compute_boundary_motion_features_fast(vid_flow,
+                                          boundaries,
+                                          compute_all_feats =True,
+                                          compute_global_feats=True,
+                                          compute_contour_feats=True,
+                                          n_contour_feat_bins=8,
+                                          cnt_sigma=3.,
+                                          n_contours=3,
+                                          n_angles=1,
+                                          angle_start=None,
+                                          pixel_res=1.,
+                                          time_res=1.,
+                                          compute_sift_feats=True,
+                                          siftshape=(64,64),
+                                          timesample=None,
+                                          use_mask=False,
+                                          masked_sift_resize='cap',
+                                          masks=None,
+                                          n_jobs=1):
+    """ Fast variant of compute_boundary_motion_features with the same parameters and outputs.
+
+    Curl and divergence are computed once per frame instead of once per object and frame, the regional speed windows are built in the bounding box of the object instead of the full frame and the SIFT extractor is created once. Objects can be processed in parallel.
+
+    Parameters
+    ----------
+    (see compute_boundary_motion_features)
+    n_jobs : int
+        number of parallel processes over objects (joblib, -1 = all CPUs). With n_jobs=1 the output is identical to the original function; in parallel,
+        the worker processes limit the BLAS threads, so BLAS-based statistics (the Haralick features) can differ in floating point round-off (~1e-15 relative), as the original function does under different BLAS thread settings.
+
+    Returns
+    -------
+    out_array : (n_organoids, n_frames-1, n_features) array
+        the concatenated motion features for every organoid in every timepoint
+    out_feat_labels : (n_features,) str array
+        the names of each feature
+    out_feat_labels_norm : (n_features,) str array
+        a boolean vector where 1 or True means the feature is normalised i.e. dimensionless.
+    """
+    if timesample is None:
+        timesample = 1
+    frames = np.arange(0, boundaries.shape[1]-1, timesample)
+    opts = dict(compute_all_feats=compute_all_feats, compute_global_feats=compute_global_feats,
+                compute_contour_feats=compute_contour_feats, n_contour_feat_bins=n_contour_feat_bins,
+                cnt_sigma=cnt_sigma, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start,
+                pixel_res=pixel_res, time_res=time_res, compute_sift_feats=compute_sift_feats, siftshape=siftshape,
+                use_mask=use_mask, masked_sift_resize=masked_sift_resize)
+    per_obj = _run_fast_feature_chunks(_motion_features_chunk_fast, len(boundaries), n_jobs,
+                                       (vid_flow, boundaries, masks, frames, opts))
+    return _assemble_fast_features(per_obj, len(boundaries), len(frames))
