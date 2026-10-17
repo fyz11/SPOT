@@ -93,6 +93,24 @@ def test_low_cuts_are_not_scales():
         assert sizes[sizes >= 3].sum() / X.shape[1] >= 0.75
 
 
+def test_min_modules_lower_bound():
+    """ scales below min_modules are skipped for the next peak; with no other peak the sole peak is used, with a warning """
+    import warnings
+    X = nested()  # peaks at 4 (3 groups + the noise group) and 9
+    k4, _, _ = sam.select_SAM_module_scales(X, min_modules=None, parsimony=1)
+    assert k4 == 4
+    k, _, scales = sam.select_SAM_module_scales(X, min_modules=5, parsimony=1)
+    assert k == 9 and (scales.n_modules >= 5).all()
+    # two independent blocks only: a single peak at 2 modules
+    rng = np.random.default_rng(0)
+    z = rng.standard_normal((400, 2))
+    X2 = np.column_stack([z[:, i // 10] + 0.5 * rng.standard_normal(400) for i in range(20)])
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter('always')
+        k2, _, _ = sam.select_SAM_module_scales(X2, min_modules=3)
+    assert k2 == 2 and any('violates the lower bound' in str(x.message) for x in w)
+
+
 def test_no_structure_does_not_crash():
     X = np.random.default_rng(1).standard_normal((300, 40))
     out = run(X, return_scales=True)

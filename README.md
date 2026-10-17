@@ -155,6 +155,7 @@ For embeddings and clustering of the SAM phenome we recommend `weight_sam_featur
 - **Candidate scales.** These are the numbers of modules whose partition of the dendrogram lives longest compared with a null of independently permuted features. A long lifetime means the modules are internally similar and far apart.
   - Only modules of at least `min_module_size=3` features are counted.
   - A cut is a scale only if its modules cover at least `min_coverage=0.75` of the features.
+  - At least `min_modules=3` modules: scales with fewer are skipped and the next peak is used. If there is no other peak, the sole peak is returned with a warning that the bound is violated.
 - **Scoring.** Each candidate is scored by a consensus of:
   - the lifetime;
   - the silhouette, Davies–Bouldin, Calinski–Harabasz and within-minus-between-module correlation, each relative to the null;

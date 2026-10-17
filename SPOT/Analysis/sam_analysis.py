@@ -246,7 +246,8 @@ def _bootstrap_stability(X, ref_labels, K, method, metric, n_boot, rng, min_modu
 
 def select_SAM_module_scales(all_feats, Z=None, C=None, hcluster_method='average', hcluster_metric='euclidean',
                              k_max=None, min_module_size=3, min_coverage=0.75, n_scales=5, n_null=10, n_boot=10,
-                             max_objects=5000, min_stability=0.6, scale='best', parsimony=0.2, random_state=0):
+                             max_objects=5000, min_stability=0.6, scale='best', parsimony=0.2, min_modules=3,
+                             random_state=0):
     r""" Multi-scale selection of the number of SAM modules from the hierarchical clustering of the features.
 
     Candidate scales are the numbers of modules k (counting modules of at least min_module_size features, so features
@@ -295,6 +296,10 @@ def select_SAM_module_scales(all_feats, Z=None, C=None, hcluster_method='average
     parsimony : float (0-1)
         scale='best' only: tolerance on the consensus_score (0-1) within which fewer modules are preferred to the best
         score. Larger = coarser.
+    min_modules : None or int
+        lower bound on the number of modules (default 3): candidate scales with fewer modules are skipped, so the next
+        peak of the lifetime curve is used. If there is no other peak, the sole peak(s) are used with a warning that the
+        bound is violated. None = no bound. Does not apply to an int scale.
     random_state : int
         seed of the null and bootstrap
 
@@ -339,6 +344,14 @@ def select_SAM_module_scales(all_feats, Z=None, C=None, hcluster_method='average
     peaks = np.flatnonzero(is_peak)
     if len(peaks) == 0:
         peaks = np.array([int(np.argmax(np.where(life > 0, gap, -np.inf)))])
+    # lower bound on the number of modules: the peaks with fewer modules are skipped (the next peaks are used), unless
+    # there is no other peak
+    if min_modules is not None and np.any(K[peaks] >= min_modules):
+        peaks = peaks[K[peaks] >= min_modules]
+    elif min_modules is not None:
+        import warnings
+        warnings.warn('select_SAM_module_scales: no scale with at least min_modules=%d modules, using %s modules '
+                      '(violates the lower bound)' % (min_modules, ', '.join(map(str, sorted(K[peaks])))))
     peaks = peaks[np.argsort(-gap[peaks])][:n_scales]
     if not isinstance(scale, str) and int(scale) not in K[peaks]:
         if not 1 <= int(scale) <= n_feats:
@@ -415,6 +428,7 @@ def hierarchical_cluster_features_into_SAM_modules(all_feats,
                                                    max_objects=5000,
                                                    min_stability=0.6,
                                                    parsimony=0.2,
+                                                   min_modules=3,
                                                    random_state=0,
                                                    return_scales=False):
 
@@ -462,6 +476,9 @@ def hierarchical_cluster_features_into_SAM_modules(all_feats,
     parsimony : float (0-1)
         module_selection='multiscale', scale='best' only: Occam's razor. Of the stable candidate scales whose consensus score (0-1) is within parsimony of the best,
         the one with the fewest modules is used, so finer scales are only chosen if clearly better. 0 = best score, larger = coarser.
+    min_modules : None or int
+        module_selection='multiscale' only: lower bound on the number of modules (default 3). Scales with fewer modules are skipped (the next peak is used);
+        if there is no other peak, the sole peak is used with a warning.
     k_max, min_module_size, min_coverage, n_scales, n_null, n_boot, max_objects, min_stability, random_state :
         module_selection='multiscale' only, see select_SAM_module_scales
     return_scales : bool
@@ -566,7 +583,7 @@ def hierarchical_cluster_features_into_SAM_modules(all_feats,
                                                                  min_coverage=min_coverage, n_scales=n_scales,
                                                                  n_null=n_null, n_boot=n_boot, max_objects=max_objects,
                                                                  min_stability=min_stability, scale=scale,
-                                                                 parsimony=parsimony,
+                                                                 parsimony=parsimony, min_modules=min_modules,
                                                                  random_state=random_state)
         final_feature_clusters = fcluster(Z, cut_height, criterion='distance')
         if debugviz:
