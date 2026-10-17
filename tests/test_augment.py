@@ -116,3 +116,62 @@ def test_fourier_remove_closing_point_is_rotation_invariant(data):
                           imshape=data['imshape'], fourier_remove_closing_point=True)
     assert list(l0) == list(l1) and sum(str(n).startswith('Fourier') for n in l0) == 98
     np.testing.assert_array_equal(f0, f1)
+
+
+def _probes(n, k, masked, n_probe=12, seed=0):
+    from scipy import ndimage
+    rng = np.random.default_rng(seed)
+    ext = sf.SingleSiftExtractor(64)
+    A, B = [], []
+    for _ in range(n_probe):
+        im = ndimage.gaussian_filter(rng.standard_normal((n, n)), 1.5) * 50 + 100
+        if masked:
+            yy, xx = np.mgrid[:n, :n]
+            m = (yy - n // 2) ** 2 + (xx - n // 2) ** 2 <= (n // 2 - 2) ** 2
+            A.append(sf._masked_sift_descriptor(im, m, resize='native'))
+            B.append(sf._masked_sift_descriptor(np.rot90(im, k), np.rot90(m, k), resize='native'))
+        else:
+            d = [ext.process_image(x).ravel() for x in (im, np.rot90(im, k))]
+            A.append(d[0] / np.linalg.norm(d[0])); B.append(d[1] / np.linalg.norm(d[1]))
+    return np.array(A), np.array(B)
+
+
+@pytest.mark.parametrize('masked', [False, True])
+def test_sift_quarter_turn_permutation(masked):
+    """ desc(rot90(im))[j] == desc(im)[P[j]]: exactly for the square grid, up to pixel discretisation of the sectors
+    for the masked descriptor; P^k for k quarter turns """
+    P = ag.sift_quarter_turn_permutation(use_mask=masked)
+    assert sorted(P) == list(range(128))
+    Pk = np.arange(128)
+    for k in (1, 2, 3):
+        Pk = Pk[P]
+        A, B = _probes(63 if masked else 64, k, masked)
+        err = np.abs(B - A[:, Pk]).max()
+        others = np.abs(B - A[:, np.roll(Pk, 1)]).max()
+        assert err < (1e-12 if not masked else 0.25 * others), (k, err, others)
+    orbit = ag.sift_rotation_orbits(use_mask=masked)
+    assert np.bincount(orbit).tolist() == [4] * 32
+
+
+def test_collapse_sift_is_opt_in_and_invariant(data):
+    kw = dict(feature_fn=sf.compute_boundary_texture_features_fast, boundaries=data['boundaries'], vid=data['vid'],
+              n_rotations=4, return_per_angle=True, verbose=False)
+    feats, labels, norm, (per_angle, _) = run_quiet(ag.compute_rotation_averaged_features, **kw)
+    assert sum(l.startswith('sift_appear_') for l in labels) == 128  # default: all bins kept
+    feats_c, labels_c, norm_c, (per_angle_c, _) = run_quiet(ag.compute_rotation_averaged_features, collapse_sift=True, **kw)
+    sift = [l for l in labels_c if l.startswith('sift_appear_')]
+    assert len(sift) == 32 and all('orbit' in l for l in sift)
+    assert len(labels_c) == len(labels) - 96 == feats_c.shape[-1] == per_angle_c.shape[-1] == len(norm_c)
+    # the orbit features are the means of the averaged bins, and invariant to quarter turns themselves
+    orbit = ag.sift_rotation_orbits(use_mask=True)
+    lab = list(labels)
+    j = [lab.index('sift_appear_%d' % (i + 1)) for i in np.flatnonzero(orbit == 0)]
+    np.testing.assert_allclose(feats_c[..., list(labels_c).index('sift_appear_orbit1')], np.nanmean(feats[..., j], -1),
+                               equal_nan=True)
+    sens = ag.rotation_sensitivity(per_angle_c, labels_c).set_index('feature')
+    sens_all = ag.rotation_sensitivity(per_angle, labels).set_index('feature')
+    assert sens.loc[sift, 'sensitivity'].median() < 0.5 * sens_all.loc[[l for l in lab if l.startswith('sift_appear_')], 'sensitivity'].median()
+    # not collapsed if the angles are not closed under quarter turns
+    out = run_quiet(ag.compute_rotation_averaged_features, feature_fn=sf.compute_boundary_texture_features_fast,
+                    boundaries=data['boundaries'], vid=data['vid'], angles=[0, 90], collapse_sift=True, verbose=False)
+    assert sum(l.startswith('sift_appear_') for l in out[1]) == 128

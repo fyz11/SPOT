@@ -19,6 +19,7 @@ Coordinates are in (row, col) image convention, as the SAM feature functions.
 """
 
 import inspect
+import warnings
 
 import numpy as np
 
@@ -151,11 +152,127 @@ def _feature_family(feature_fn):
     raise ValueError('feature_fn must be a SAM feature function (shape, appearance or motion)')
 
 
+# the SIFT descriptors of the SAM features, named <prefix><bin>, bin = 1 .. 128
+SIFT_PREFIXES = ('sift_appear_', 'sift_motion_', 'curl_sift_', 'div_sift_')
+
+
+def sift_quarter_turn_permutation(use_mask=True, n_angles=8, n_cells=(4, 4)):
+    """ The permutation of the SIFT descriptor bins of the SAM features under a quarter turn of the image (np.rot90):
+    desc(np.rot90(im))[j] == desc(im)[P[j]].
+
+    Both descriptors are (n_angles orientations) x (spatial cells), orientation-major. A quarter turn shifts the
+    orientations by n_angles / 4 bins and permutes the cells:
+    - use_mask=False (SingleSiftExtractor, 4 x 4 grid of the square patch): cell (row, col) -> (col, n - 1 - row)
+    - use_mask=True (_masked_sift_descriptor, n_rings depth rings x n_sectors angular sectors about the centroid):
+      the rings are unchanged and the sectors shift by n_sectors / 4.
+    Both were verified numerically (the unmasked one exactly) against np.rot90 of random texture patches.
+
+    Parameters
+    ----------
+    use_mask : bool
+        masked (ring x sector) or unmasked (square grid) descriptor
+    n_angles : int
+        number of orientation bins (divisible by 4)
+    n_cells : (int, int)
+        (rows, cols) of the unmasked grid (square) or (n_rings, n_sectors) of the masked cells (n_sectors divisible by 4)
+
+    Returns
+    -------
+    P : (n_angles * n_cells[0] * n_cells[1],) int array
+    """
+    n1, n2 = n_cells
+    if n_angles % 4 or (use_mask and n2 % 4) or (not use_mask and n1 != n2):
+        raise ValueError('the descriptor is not closed under quarter turns')
+    a, c1, c2 = np.unravel_index(np.arange(n_angles * n1 * n2), (n_angles, n1, n2))
+    a = (a + n_angles // 4) % n_angles
+    if use_mask:
+        c2 = (c2 + n2 // 4) % n2
+    else:
+        c1, c2 = c2, n1 - 1 - c1
+    return np.ravel_multi_index((a, c1, c2), (n_angles, n1, n2))
+
+
+def sift_rotation_orbits(use_mask=True, n_angles=8, n_cells=(4, 4)):
+    """ The orbits of the SIFT descriptor bins under quarter turns: (n_bins,) int array of orbit ids 0 .. n_orbits-1,
+    numbered by their lowest bin. Features averaged over a set of angles closed under +90 degrees (e.g. n_rotations=4 or
+    8) are (up to resampling) equal within an orbit. """
+    P = sift_quarter_turn_permutation(use_mask, n_angles, n_cells)
+    orbit = -np.ones(len(P), dtype=np.int64)
+    n = 0
+    for j in range(len(P)):
+        if orbit[j] < 0:
+            k = j
+            while orbit[k] < 0:
+                orbit[k] = n
+                k = P[k]
+            n += 1
+    return orbit
+
+
+def collapse_sift_orbits(feats, labels, norm_bool=None, use_mask=True):
+    """ Replace the SIFT descriptor bins of rotation-averaged SAM features by one feature per quarter-turn orbit (their
+    mean): after averaging over rotations, the bins of an orbit carry the same information, so they would be counted 4
+    times (and form tight near-duplicate groups in correlation-based analyses). Other features are unchanged.
+
+    Parameters
+    ----------
+    feats : (..., n_features) array
+    labels : (n_features,) str array
+    norm_bool : None or (n_features,) bool array
+    use_mask : bool
+        the SIFT descriptor layout (see sift_quarter_turn_permutation)
+
+    Returns
+    -------
+    feats_out : (..., n_features_out) array
+    labels_out : (n_features_out,) str array
+        the orbit features are named <prefix>orbit<id>, id = 1 .. 32 for 128-bin descriptors
+    norm_bool_out : (n_features_out,) bool array, if norm_bool is given
+    """
+    feats = np.asarray(feats)
+    labels = np.asarray(labels).astype(str)
+    keep, cols, names, norms = np.ones(len(labels), dtype=bool), [], [], []
+    for prefix in SIFT_PREFIXES:
+        idx = np.flatnonzero(np.char.startswith(labels, prefix))
+        idx = idx[[labels[i][len(prefix):].isdigit() for i in idx]]
+        if len(idx) == 0:
+            continue
+        bins = np.array([int(labels[i][len(prefix):]) - 1 for i in idx])
+        n_bins = int(bins.max()) + 1
+        if len(idx) != n_bins or n_bins % 32:
+            raise ValueError('%s: expected a full 8 x 16 (or 8 x 4k) descriptor' % prefix)
+        n_cells = (4, n_bins // 32) if use_mask else (int(round(np.sqrt(n_bins // 8))),) * 2
+        orbit = sift_rotation_orbits(use_mask, 8, n_cells)[bins]
+        keep[idx] = False
+        for o in range(orbit.max() + 1):
+            members = idx[orbit == o]
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', RuntimeWarning)  # all-NaN samples (absent objects)
+                cols.append(np.nanmean(feats[..., members], axis=-1))
+            names.append('%sorbit%d' % (prefix, o + 1))
+            if norm_bool is not None:
+                norms.append(bool(np.asarray(norm_bool)[members[0]]))
+    if not cols:
+        return (feats, labels) if norm_bool is None else (feats, labels, np.asarray(norm_bool))
+    feats_out = np.concatenate([feats[..., keep], np.stack(cols, axis=-1)], axis=-1)
+    labels_out = np.concatenate([labels[keep], names])
+    if norm_bool is None:
+        return feats_out, labels_out
+    return feats_out, labels_out, np.concatenate([np.asarray(norm_bool)[keep], norms])
+
+
 def compute_rotation_averaged_features(feature_fn, boundaries, vid=None, masks=None, imshape=None, n_rotations=4,
                                        angles=None, interp_order=3, flow_params=None, rescale_intensity=True,
-                                       n_jobs=None, return_per_angle=False, verbose=True, **feature_kwargs):
+                                       n_jobs=None, return_per_angle=False, verbose=True, collapse_sift=False,
+                                       **feature_kwargs):
     """ Rotation-averaged SAM features: rotate the inputs by n angles, compute the features at each angle with
     feature_fn and average them.
+
+    A quarter turn permutes the SIFT descriptor bins (orientations and spatial cells), so after averaging over a set of
+    angles closed under +90 degrees (n_rotations divisible by 4) the 4 bins of each quarter-turn orbit carry the same
+    information. When rotation invariance is to be enforced, collapse_sift=True replaces them by one feature per orbit
+    (their mean, named <prefix>orbit<id>; 32 instead of 128 per descriptor), so they are not counted 4 times. The default
+    (False) keeps all the bins.
 
     Parameters
     ----------
@@ -188,6 +305,10 @@ def compute_rotation_averaged_features(feature_fn, boundaries, vid=None, masks=N
         if True also return the (n_angles, n_objects, n_frames, n_features) features at every angle and the angles
     verbose : bool
         print the angle being computed
+    collapse_sift : bool
+        False (default): keep all SIFT bins. True (to enforce rotation invariance): replace the SIFT bins by one feature
+        per quarter-turn orbit (collapse_sift_orbits), if the angles are closed under +90 degrees; per_angle
+        (return_per_angle) is collapsed the same way, so it matches the returned labels.
     feature_kwargs :
         any other arguments of feature_fn (e.g. use_mask=True, pixel_res, device)
 
@@ -244,9 +365,20 @@ def compute_rotation_averaged_features(feature_fn, boundaries, vid=None, masks=N
     with warnings.catch_warnings():
         warnings.simplefilter('ignore', RuntimeWarning)  # all-NaN samples (absent objects)
         out = np.nanmean(per_angle, axis=0)
+    out_labels, out_norm = labels, norm
+    if collapse_sift:
+        quarter = np.array([_quarter_turns(a) is not None for a in angles])
+        closed = np.allclose(np.sort(np.mod(angles + 90., 360.)), np.sort(np.mod(angles, 360.)), atol=1e-6)
+        if closed:
+            use_mask = feature_kwargs.get('use_mask', params['use_mask'].default if 'use_mask' in params else False)
+            out, out_labels, out_norm = collapse_sift_orbits(out, labels, norm, use_mask=bool(use_mask))
+            if return_per_angle:
+                per_angle = collapse_sift_orbits(per_angle, labels, use_mask=bool(use_mask))[0]
+        elif verbose and np.any(np.char.find(labels, 'sift') >= 0):
+            print('angles not closed under 90 degree turns (%s): SIFT bins not collapsed' % quarter, flush=True)
     if return_per_angle:
-        return out, labels, norm, (per_angle, angles)
-    return out, labels, norm
+        return out, out_labels, out_norm, (per_angle, angles)
+    return out, out_labels, out_norm
 
 
 def rotation_sensitivity(per_angle, labels):
