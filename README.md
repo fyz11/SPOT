@@ -9,6 +9,13 @@
    * [Introduction to SPOT](#introduction-to-spot)
    * [Introduction to the SAM phenome](#introduction-to-the-sam-phenome)
         + [Code snippet to compute phenome](#code-snippet-to-compute-phenome)
+        + [Masked appearance and motion features](#masked-appearance-and-motion-features)
+        + [Faster extraction](#faster-extraction)
+        + [Rotation-averaged features](#rotation-averaged-features)
+   * [Analysing the SAM phenome](#analysing-the-sam-phenome)
+        + [Equal weighting of the SAM sets and feature families](#equal-weighting-of-the-sam-sets-and-feature-families)
+        + [Regressing out confounders](#regressing-out-confounders)
+        + [SAM module selection](#sam-module-selection)
    * [Associated Papers](#associated-papers)
    * [Associated Datasets](#associated-datasets)
    * [Getting Started](#getting-started)
@@ -32,12 +39,15 @@
 - Python 3.9 - 3.13 and NumPy 2 supported. PyTorch is installed by default and runs the detection / segmentation networks and the GPU feature functions; TensorFlow is only needed for the original Keras functions (`pip install SAM-SPOT[keras-legacy]`).
 - UMAP (`umap-learn`) and PaCMAP (`pacmap`) are both installed for embedding the SAM phenome.
 - Faster SAM phenome extraction: the shape, appearance and motion functions now run an optimised implementation by default (`fast=True`, parallel over objects / frames with `n_jobs`), and `*_torch` GPU variants are available, with the same outputs. See [Faster extraction](#faster-extraction).
-- **New default:** the appearance and motion features are masked (`use_mask=True`): they describe only the object interior and do not leak shape. Use `use_mask=False` for the original SAM features.
-- Recommended for analysis: equal weighting of the SAM feature sets and feature families for embeddings and clustering: `SPOT.Analysis.preprocessing.weight_sam_features(feats, names, group_weighting=True, set_weighting=True)` gives shape, appearance and motion the same total variance and, within each, every feature family (e.g. curvature vs shape context, Haralick vs SIFT, speed vs curl SIFT) the same weight.
-- Optional, depending on the experimental design: regressing out confounders (`regress_out_confounders`; by default only the batch, with size, intensity etc. chosen per dataset), and rotation-averaged features (`SPOT.Features.augment`).
-  To enforce rotation invariance, `compute_rotation_averaged_features` also replaces the SIFT bins that the averaging makes equivalent (the 4 bins of each quarter-turn orbit) by one feature per orbit, 32 instead of 128 per descriptor (`collapse_sift=True`, default; `False` keeps all bins).
+- **New default:** the appearance and motion features are masked (`use_mask=True`): they describe only the object interior and do not leak shape. Use `use_mask=False` for the original SAM features. See [Masked appearance and motion features](#masked-appearance-and-motion-features).
+- Bug fix: the unmasked motion SIFT descriptors zeroed the flow inside instead of outside the object.
+- Recommended for analysis: equal weighting of the SAM feature sets and feature families for embeddings and clustering (`weight_sam_features`). See [Equal weighting](#equal-weighting-of-the-sam-sets-and-feature-families).
+- Optional, depending on the experimental design: regressing out confounders (`regress_out_confounders`; by default only the batch, with size, intensity etc. chosen per dataset), and rotation-invariant features (`SPOT.Features.augment`). See [Regressing out confounders](#regressing-out-confounders) and [Rotation-averaged features](#rotation-averaged-features).
 - **New default:** multi-scale selection of the number of SAM modules (`hierarchical_cluster_features_into_SAM_modules(..., module_selection='multiscale')`). See [SAM module selection](#sam-module-selection).
+- The pretrained detection / segmentation networks are archived on Zenodo ([doi:10.5281/zenodo.23438299](https://doi.org/10.5281/zenodo.23438299)) and downloaded automatically. See [Pretrained Neural Network Models](#pretrained-neural-network-models-for-organoid-detection-and-segmentation).
 - Demo of all the new features on a self-contained synthetic time-lapse: [`examples/SPOT_demo_new_features.ipynb`](examples/SPOT_demo_new_features.ipynb) (notebook) and `examples/SPOT_demo_new_features.py` (script).
+- These features are in this repository; the PyPI release 0.1.1 predates them (install from GitHub, see [To install](#to-install)).
+- The code as published with the Nature Communications papers is preserved as the GitHub release [v0.1.1-natcomm](https://github.com/fyz11/SPOT/releases/tag/v0.1.1-natcomm).
 
 #### Aug 2026
 - Both SPOT methods and application papers published in Nature Communcations!
@@ -49,7 +59,7 @@
 
 #### Jan 2026
 - Tutorial video for installing SPOT, [link](https://www.dropbox.com/scl/fi/yyebz7clz4m46791zigj6/SPOT-tutorial.mp4?rlkey=aio3zsr33l4szh8gk4290ku1a&e=1&st=sw9ist2l&dl=0)
-- added optional dependency to install `pacmap`. Requires externally installing from conda-forge the `python-annoy` package. 
+- added optional dependency to install `pacmap` (a core dependency since Oct 2026). Requires externally installing from conda-forge the `python-annoy` package.
 
 
 <!-- TOC --><a name="introduction-to-spot"></a>
@@ -75,7 +85,9 @@ This led us to design a single generalized SAM feature set (depicted above) whic
 
 <!-- TOC --><a name="code-snippet-to-compute-phenome"></a>
 ### Code snippet to compute phenome
-The SPOT library computes the shape, appearance and motion-associated features in the SAM phenome separately to allow separate usage. To compute, you need to have the video as an array (`vid`) of (n_frames, n_rows, n_columns) and tracked and segmented object boundaries given as an array (`boundaries`) of (n_objects, n_frames, n_contour_points, 2). The last dimension of the boundaries array specifies (y,x) image coordinate convention. The boundaries array should use `numpy.nan` for any timepoints where an object was not present. You also need to specify the pixel resolution in micrometers (`pixel_res`) and the time elapsed (`time_res`) between each video frame in hours
+The SPOT library computes the shape, appearance and motion-associated features in the SAM phenome separately to allow separate usage. To compute, you need to have the video as an array (`vid`) of (n_frames, n_rows, n_columns) and tracked and segmented object boundaries given as an array (`boundaries`) of (n_objects, n_frames, n_contour_points, 2). The last dimension of the boundaries array specifies (y,x) image coordinate convention. The boundaries array should use `numpy.nan` for any timepoints where an object was not present. You also need to specify the pixel resolution in micrometers (`pixel_res`) and the time elapsed (`time_res`) between each video frame in hours.
+
+All three functions run the optimised implementation by default and take `n_jobs` to compute objects / frames in parallel (see [Faster extraction](#faster-extraction)); appearance and motion are masked to the object interior by default and optionally take the foreground segmentation `masks` (see [Masked appearance and motion features](#masked-appearance-and-motion-features)).
 
 #### Computing Shape Phenome
 ```
@@ -95,6 +107,7 @@ metrics, metrics_labels, metrics_norm_bool = SPOT_SAM_features.compute_boundary_
 #### Computing Motion Phenome
 Unlike shape and appearance, motion needs to first compute the dense optical flow. Consequently motion features are not available for object instances in the last video frame. 
 ```
+import numpy as np
 import SPOT.Features.features as SPOT_SAM_features
 import SPOT.Tracking.optical_flow as SPOT_optical_flow
 import skimage.exposure as skexposure
@@ -108,9 +121,17 @@ flow = SPOT_optical_flow.extract_vid_optflow(vid_norm,
                                              rescale_intensity=True)
 
 # then compute motion features. As the flow does not account for the last frame of the video, motion features also miss the last frame object instances.
-metrics, metrics_labels, metrics_norm_bool = SPOT_SAM_features.compute_boundary_motion_features(flow 
-                                                                                                boundaries)
+metrics, metrics_labels, metrics_norm_bool = SPOT_SAM_features.compute_boundary_motion_features(flow, 
+                                                                                                boundaries,
+                                                                                                pixel_res=pixel_res,
+                                                                                                time_res=time_res)
 ```
+
+<!-- TOC --><a name="masked-appearance-and-motion-features"></a>
+#### Masked appearance and motion features
+By default (`use_mask=True`) the Haralick and SIFT appearance features and the motion SIFT descriptors only use the pixels inside the object (optionally intersected with foreground segmentation `masks` when the contours are coarse), so appearance and motion do not double count shape. The masked SIFT descriptors are computed on the object patch with its longest side capped at 64 pixels (`masked_sift_resize='cap'`, `siftshape=(64, 64)`), similar to the 64 x 64 patches of the original SIFT features. With `use_mask=False` they are computed on the bounding box crop of the object, as in the original SAM phenome, and also describe its outline.
+
+Bug fix: the unmasked motion SIFT descriptors (speed, curl, divergence) set the flow *inside* the object to 0, contrary to their intent, so they described the background flow and the object outline; the flow outside the object is now set to 0.
 
 <!-- TOC --><a name="faster-extraction"></a>
 #### Faster extraction
@@ -126,15 +147,30 @@ metrics, metrics_labels, metrics_norm_bool = SPOT_SAM_features_torch.compute_bou
 ```
 See `benchmarks/benchmark_results.md` for timings.
 
+<!-- TOC --><a name="rotation-averaged-features"></a>
 #### Rotation-averaged features
-Some SAM features depend on the orientation of the object in the image (e.g. SIFT orientation histograms, angular sectors of the regional windows). `SPOT.Features.augment.compute_rotation_averaged_features` rotates the video, contours and masks by `n_rotations` evenly spaced angles (multiples of 90 degrees are exact, other angles interpolate the frames; for motion the optical flow is recomputed on every rotated video), computes the features with any of the feature functions (original, `_fast` or `_torch`) and averages them. `rotation_sensitivity` reports per feature how much it changes with the angle.
+Some SAM features depend on the orientation of the object in the image (e.g. SIFT orientation histograms, angular sectors of the regional windows). To make them rotation invariant, `SPOT.Features.augment.compute_rotation_averaged_features` rotates the video, contours and masks by `n_rotations` evenly spaced angles (multiples of 90 degrees are exact, other angles interpolate the frames; for motion the optical flow is recomputed on every rotated video), computes the features with any of the feature functions (original, `_fast` or `_torch`) and averages them. After averaging, the 4 SIFT bins of each quarter-turn orbit are equivalent, so they are replaced by one feature per orbit (32 instead of 128 per descriptor; `collapse_sift=True` by default, `False` keeps all bins; only in this function, the feature functions themselves always return all bins). `rotation_sensitivity` reports per feature how much it changes with the angle.
 ```
 import SPOT.Features.augment as SPOT_augment
 
-metrics, metrics_labels, metrics_norm_bool = SPOT_augment.compute_rotation_averaged_features(SPOT_SAM_features.compute_boundary_texture_features_fast,
+metrics, metrics_labels, metrics_norm_bool = SPOT_augment.compute_rotation_averaged_features(SPOT_SAM_features.compute_boundary_texture_features,
                                                                                             boundaries, vid=vid, n_rotations=4, n_jobs=-1)
 ```
 
+<!-- TOC --><a name="analysing-the-sam-phenome"></a>
+## Analysing the SAM phenome
+The Stage 3 example (`examples/SPOT_demo_single-cell-tracking-challenge_Step3_...py`) shows the full analysis: normalisation of the features (StandardScaler + power transform, `SPOT.Analysis.preprocessing`), embedding (UMAP or PaCMAP), clustering into phenotypes and SAM modules. New in Oct 2026:
+
+<!-- TOC --><a name="equal-weighting-of-the-sam-sets-and-feature-families"></a>
+#### Equal weighting of the SAM sets and feature families
+The SAM sets have very different numbers of features (hundreds of shape context, ECT and SIFT bins against a handful of intensity or speed features), so without weighting the largest feature families dominate every distance. For embeddings and clustering we recommend `weight_sam_features` (after the per-feature normalisation): it gives shape, appearance and motion the same total variance (`set_weighting=True`) and, within each, every feature family the same weight (`group_weighting=True`; e.g. curvature vs shape context, Haralick vs SIFT, speed vs curl SIFT). `sam_feature_groups` lists the set and family of every feature.
+```
+import SPOT.Analysis.preprocessing as preprocess
+
+embed_feats = preprocess.weight_sam_features(all_feats, feature_names, group_weighting=True, set_weighting=True)
+```
+
+<!-- TOC --><a name="regressing-out-confounders"></a>
 #### Regressing out confounders
 `SPOT.Analysis.preprocessing.regress_out_confounders` removes undesired effects from the normalised features (after StandardScaler + power transform, before `weight_sam_features` / UMAP): continuous covariates such as size or intensity (cubic spline of their rank, so non-linear monotone effects are removed too) and categorical covariates such as batch or plate (mean shift, optionally also scale with `batch_scale=True`). With `reference=` (e.g. the control objects) the effects are estimated on those rows only and removed from all, so condition differences are not regressed away. `ConfoundRegressor` keeps the fitted model for new data and `confound_association` reports the remaining association per feature.
 ```
@@ -152,11 +188,7 @@ all_feats_corrected, feature_names_corrected = preprocess.regress_out_confounder
 Features that remain strongly associated with a confound after the correction (|Spearman rho| > 0.3 or batch eta^2 > 0.1, e.g. step-like dependences a smooth curve cannot remove) are dropped (`drop_associated=True`, thresholds `max_abs_rho`, `max_eta2`).
 Batch is the default confounder. Continuous covariates such as size or intensity are set per dataset, and only when they are truly undesired there: on MPEG-7 x Brodatz, for example, regressing out size also removes much of what separates the shapes.
 
-#### Masked appearance and motion features
-By default (`use_mask=True`) the Haralick and SIFT appearance features and the motion SIFT descriptors only use the pixels inside the object (optionally intersected with foreground segmentation `masks` when the contours are coarse), so appearance and motion do not double count shape. The masked SIFT descriptors are computed on the object patch with its longest side capped at 64 pixels (`masked_sift_resize='cap'`, `siftshape=(64, 64)`), similar to the 64 x 64 patches of the original SIFT features. With `use_mask=False` they are computed on the bounding box crop of the object, as in the original SAM phenome, and also describe its outline. Bug fix: the unmasked motion SIFT descriptors (speed, curl, divergence) set the flow *inside* the object to 0, contrary to their intent, so they described the background flow and the object outline; the flow outside the object is now set to 0.
-
-For embeddings and clustering of the SAM phenome we recommend `weight_sam_features` (after the per-feature normalisation), so that every SAM set and feature family contributes equally.
-
+<!-- TOC --><a name="sam-module-selection"></a>
 #### SAM module selection
 `SPOT.Analysis.sam_analysis.hierarchical_cluster_features_into_SAM_modules` groups the features into SAM modules by hierarchical clustering of their correlation profiles. The number of modules is chosen with `module_selection='multiscale'` (default; `select_SAM_module_scales`):
 - **Candidate scales.** These are the numbers of modules whose partition of the dendrogram lives longest compared with a null of independently permuted features. A long lifetime means the modules are internally similar and far apart.
@@ -177,7 +209,7 @@ For embeddings and clustering of the SAM phenome we recommend `weight_sam_featur
 
 <!-- TOC --><a name="associated-papers"></a>
 ## Associated Papers
-SPOT is associated with the following papers (which are currently under journal revision), which you will be able to read after publication for more technical detail and get an idea of the many applications SPOT enables: 
+SPOT is associated with the following papers, published in Nature Communications, for more technical detail and an idea of the many applications SPOT enables: 
 
 1. (Methods paper, 2D fixed and live-cell imaging application) **Development of a universal imaging “phenome” using shape, appearance and motion (SAM) features and the SAM Phenotype Observation Tool (SPOT)**, [Nat. Comms, 2026](https://www.nature.com/articles/s41467-026-75505-8), written by Felix Y. Zhou, Adam Norton-Steele, Lewis Marsh, Helen M. Byrne, Heather A. Harrington and Xin Lu.
 
@@ -192,14 +224,16 @@ The [Synthetic Ground Truth Organoid (SGTO) datasets](https://zenodo.org/records
 ## Getting Started
 Detailed guide to setting up and installing SPOT, and running the exemplar scripts provided on example data is detailed in the [Getting Started word document]( https://github.com/fyz11/SPOT/blob/main/Getting%20Started%20with%20SPOT.docx) 
 
+To see the Oct 2026 features (masked and fast extraction, weighting, confound regression, rotation invariance, module selection, UMAP / PaCMAP, pretrained networks) in a few minutes without any data, start with the demo [`examples/SPOT_demo_new_features.ipynb`](examples/SPOT_demo_new_features.ipynb) (or the script `examples/SPOT_demo_new_features.py`).
+
 Exemplar scripts to run every step of the workflow are provided in the Examples folder to work with the provided example data located in the data/ folder. This includes:
 
 **for SPOT Stage 1: video acquisition and object segmentation:**
 1. SPOT_Stage1_Step0_translation-register-RGB-confocal_video.py
 2. SPOT_Stage1_Step0_unmix-RGB-confocal_video.py
-3. SPOT_Stage1_Step1_detect_bbox-RGB-confocal_video.py
+3. SPOT_Stage1_Step1_detect_bbox-RGB-confocal_video.py (Keras) or SPOT_Stage1_Step1_detect_bbox-RGB-confocal_video_torch.py (PyTorch)
 4. SPOT_Stage1_Step2_track_detect_bbox-RGB-confocal_video.py
-5. SPOT_Stage1_Step3_segment_tracked_bbox-RGB-confocal_video.py
+5. SPOT_Stage1_Step3_segment_tracked_bbox-RGB-confocal_video.py (Keras) or SPOT_Stage1_Step3_segment_tracked_bbox-RGB-confocal_video_torch.py (PyTorch)
 6. SPOT_Stage1_Step4_postprocess_segment_tracked_bbox-RGB-confocal_video.py
 
 **for SPOT Stage 2: computation of SAM (Shape, Appearance and Motion) phenome:**    
@@ -237,7 +271,7 @@ Files are cached in `~/.cache/SPOT/models` (or `$SPOT_MODELS_DIR`). The PyTorch 
 
 <!-- TOC --><a name="documentation"></a>
 ## Documentation
-Documented API of the functions provided in this library is available as a html in the docs/build/hmtl folder. You can build up-to-date docs by going into docs/ and executing:
+Documented API of the functions provided in this library is available as a html in the docs/build/html folder. You can build up-to-date docs by going into docs/ and executing:
 ```shell
 make html
 ```
@@ -250,11 +284,13 @@ conda create -n SAM-SPOT_env python=3.12
 conda install -n SAM-SPOT_env -c conda-forge python-annoy
 pip install .
 ```
-You can also install directly from the github without cloning, but will still need to manually download the pretrained model weights:
+You can also install directly from the github without cloning:
 ```shell
-pip install SPOT@git+https://github.com/fyz11/SPOT.git
+pip install "SAM-SPOT @ git+https://github.com/fyz11/SPOT.git"
 ```
-You can also install directly from PyPI without cloning, but will still need to manually download the pretrained model weights, if using the neural nets:
+The pretrained detection / segmentation weights are downloaded automatically on first use (see [Pretrained Neural Network Models](#pretrained-neural-network-models-for-organoid-detection-and-segmentation)).
+
+You can also install the PyPI release, which is version 0.1.1 and predates the Oct 2026 features (Python 3.9 - 3.10; the pretrained weights need to be downloaded manually for its Keras functions):
 ```shell
 pip install SAM-SPOT
 ```
