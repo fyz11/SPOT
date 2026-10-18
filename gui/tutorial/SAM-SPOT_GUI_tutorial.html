@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SAM-SPOT GUI tutorial</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 18mm 15mm; }
+  :root { --ink: #1c2430; --muted: #5a6575; --accent: #0b5394; --soft: #eef3fb; --rule: #d5dce6; --tip: #fff8e1; --tipbar: #f2b600; --warn: #fdecef; --warnbar: #c62850; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font-family: "Segoe UI", Calibri, Arial, sans-serif; color: var(--ink); font-size: 10.5pt; line-height: 1.45; margin: 0; }
+  h1 { font-size: 22pt; color: var(--accent); margin: 0 0 4pt; }
+  h2 { font-size: 15pt; color: var(--accent); border-bottom: 2px solid var(--accent); padding-bottom: 3pt; margin: 18pt 0 8pt; break-after: avoid; }
+  h3 { font-size: 12pt; margin: 14pt 0 5pt; break-after: avoid; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 8pt; padding-left: 18pt; }
+  li { margin-bottom: 3pt; }
+  code, .k { font-family: Consolas, "Courier New", monospace; font-size: 9pt; background: #f2f4f7; border: 1px solid #e3e7ec; border-radius: 3px; padding: 0 3px; }
+  pre { font-family: Consolas, monospace; font-size: 8.8pt; background: #f2f4f7; border: 1px solid #e3e7ec; border-radius: 4px; padding: 6pt 8pt; white-space: pre-wrap; break-inside: avoid; }
+  .ui { font-weight: 600; color: #0d3b66; }
+  figure { margin: 8pt 0 12pt; break-inside: avoid; text-align: center; }
+  figure img { max-width: 100%; max-height: 105mm; border: 1px solid var(--rule); border-radius: 4px; }
+  figcaption { font-size: 9pt; color: var(--muted); margin-top: 4pt; text-align: left; }
+  .tip, .warn { border-left: 4px solid var(--tipbar); background: var(--tip); padding: 6pt 9pt; margin: 8pt 0; border-radius: 0 4px 4px 0; break-inside: avoid; }
+  .warn { border-left-color: var(--warnbar); background: var(--warn); }
+  .tip b:first-child, .warn b:first-child { margin-right: 4pt; }
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; font-size: 9.5pt; break-inside: avoid; }
+  th, td { border: 1px solid var(--rule); padding: 4pt 6pt; text-align: left; vertical-align: top; }
+  th { background: var(--soft); }
+  .cover { height: 250mm; display: flex; flex-direction: column; justify-content: center; text-align: center; break-after: page; }
+  .cover img.logo { width: 95mm; margin: 0 auto 14pt; }
+  .cover .sub { font-size: 13pt; color: var(--muted); margin-bottom: 18pt; }
+  .cover .meta { font-size: 10pt; color: var(--muted); margin-top: 24pt; }
+  .cover img.shot { width: 150mm; margin: 0 auto; border: 1px solid var(--rule); border-radius: 4px; }
+  .toc ol { columns: 2; column-gap: 18pt; }
+  .page { break-before: page; }
+  .steps { counter-reset: s; list-style: none; padding-left: 0; }
+  .steps > li { counter-increment: s; position: relative; padding-left: 22pt; margin-bottom: 5pt; }
+  .steps > li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 15pt; height: 15pt; border-radius: 50%; background: var(--accent); color: white; font-size: 8.5pt; font-weight: 700; text-align: center; line-height: 15pt; }
+  .two { display: flex; gap: 8pt; }
+  .two figure { flex: 1; }
+  .three { display: flex; gap: 6pt; }
+  .three figure { flex: 1; margin: 4pt 0; }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <img class="logo" src="../assets/sam_spot_logo.png" alt="SAM-SPOT">
+  <h1>SAM-SPOT graphical interface</h1>
+  <div class="sub">Step-by-step tutorial: phenotyping organoid videos and Cell Tracking Challenge datasets without writing code</div>
+  <img class="shot" src="images/org_standard_tab5.png" alt="The analysis tab of the SAM-SPOT GUI">
+  <div class="meta">SAM-SPOT GUI 1.0 with SPOT 2.0 &middot; gui/spot_gui.py</div>
+</section>
+
+<section class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li>What the GUI does</li>
+    <li>Installing and starting the GUI</li>
+    <li>The window at a glance</li>
+    <li>Tutorial A: organoid videos</li>
+    <li>Tutorial B: a Cell Tracking Challenge dataset</li>
+    <li>Reading the results</li>
+    <li>Reproducibility, resuming and the command line</li>
+    <li>Themes</li>
+    <li>Troubleshooting</li>
+  </ol>
+</section>
+
+<h2>1. What the GUI does</h2>
+<p>SPOT (Shape, Appearance and Motion Phenotype Observation Tool) measures the <b>SAM phenome</b> of every organoid or cell in a time-lapse video: the shape, appearance and motion features of each object at each time point. It then maps all objects onto a phenotype landscape, finds SAM modules (groups of features that change together), phenotype clusters, the average phenotype trajectory of each condition and the transitions between phenotypes.</p>
+<p>The GUI runs this whole workflow from a folder of videos to the figures, in three stages:</p>
+<table>
+  <tr><th style="width:18%">Stage</th><th>Steps</th></tr>
+  <tr><td><b>1. Find objects</b></td><td>Prepare the videos (grayscale, resize, drift correction) &rarr; detect organoids (YOLOv3 network) &rarr; track them over time &rarr; outline them (attention U-Net) &rarr; clean up the tracks. For a Cell Tracking Challenge dataset the annotations replace detection, tracking and segmentation.</td></tr>
+  <tr><td><b>2. SAM phenome</b></td><td>Shape, appearance and motion features of every object at every time point; optional fluorescent marker measurements; compile all videos into dataset tables.</td></tr>
+  <tr><td><b>3. Analysis</b></td><td>Feature normalisation, SAM modules, phenotype map (UMAP / PaCMAP), clusters, time course, trajectories, phenotype transitions (hidden Markov model) and marker plots.</td></tr>
+</table>
+<p>The heavy computation runs in a separate process, so the window stays responsive, a run can be stopped at any time, and a stopped run resumes where it stopped.</p>
+
+<h2>2. Installing and starting the GUI</h2>
+<ol class="steps">
+  <li>Install SPOT and its dependencies as described in the main <code>README.md</code> of the repository (a conda environment, e.g. <code>SAM-SPOT_env</code>). A GPU is used if available but is not required.</li>
+  <li>Start the GUI from the repository folder:
+<pre>conda activate SAM-SPOT_env
+python gui/spot_gui.py</pre>
+  On Windows you can instead double-click <code>gui/launch_spot_gui.bat</code> (edit <code>SPOT_ENV</code> in it if your environment has another name).</li>
+  <li>The GUI reopens the last project automatically. To start again, click <span class="ui">New project</span>.</li>
+</ol>
+<div class="tip"><b>Tip</b>The pretrained networks are taken from the repository <code>models</code> folder, or downloaded automatically from Zenodo the first time they are needed.</div>
+
+<h2>3. The window at a glance</h2>
+<p>The header holds the project buttons (<span class="ui">New project</span>, <span class="ui">Open project...</span>, <span class="ui">Load settings...</span>, <span class="ui">Save project</span>) and the <span class="ui">Theme</span> menu. Below are five tabs, used from left to right:</p>
+<table>
+  <tr><th style="width:24%">Tab</th><th>What you do there</th></tr>
+  <tr><td><b>1. Set up</b></td><td>Choose what to analyse, the input and results folders, the pixel size and time between frames; tick the videos to analyse.</td></tr>
+  <tr><td><b>2. Sample info</b></td><td>Give every video its condition (e.g. drug) and optionally genotype, patient / batch and marker.</td></tr>
+  <tr><td><b>3. Run pipeline</b></td><td>Tick the steps, click <span class="ui">Run</span>, follow the progress of every video and the log.</td></tr>
+  <tr><td><b>4. Check segmentation</b></td><td>Step through each video with the outlines drawn on top, to check that the objects are found and outlined well.</td></tr>
+  <tr><td><b>5. Analysis &amp; results</b></td><td>Choose how to compare the objects, run the analysis and browse every figure and table.</td></tr>
+</table>
+<p>Hover over any label, box or button to see a short explanation.</p>
+
+<!-- ============================================================== -->
+<h2 class="page">4. Tutorial A: organoid videos</h2>
+<p>This tutorial uses the folder <code>data/full_dataset_with_biomarker/26-SPOT-Drug screen-dye/Hoescht Only/Videos</code> of the repository: 15 brightfield videos of organoids treated with DMSO, cisplatin (6 and 100 &micro;M), 5-fluorouracil or docetaxel. To keep it quick, only one video (<code>E5 5FU Hoechst 1</code>) is ticked for analysis; the steps are the same for all of them.</p>
+
+<h3>4.1 Set up (tab 1)</h3>
+<ol class="steps">
+  <li>Under <span class="ui">What to analyse</span>, keep <span class="ui">Videos (SPOT finds, tracks and outlines the organoids)</span>.</li>
+  <li><span class="ui">Videos folder</span>: click <span class="ui">Browse...</span> and choose the folder with your videos. The videos are listed on the right.</li>
+  <li><span class="ui">Results folder</span>: choose a new, empty folder. Every result and the project file <code>spot_project.json</code> are written here; your videos are never changed.</li>
+  <li><span class="ui">Dataset name</span> (optional): a short name used for the compiled tables.</li>
+  <li><span class="ui">File types</span>: the video extensions to look for (<code>.avi .tif .tiff .wmv .mp4 .mov</code>).</li>
+  <li>If every brightfield video <code>&lt;name&gt; BF.AVI</code> has a fluorescent marker video <code>&lt;name&gt;.AVI</code>, tick <span class="ui">Each brightfield video has a matching fluorescent marker video</span> and check the name ending and marker channel. The organoids are found in the brightfield video and the marker is measured inside them.</li>
+  <li><span class="ui">Pixel size</span> and <span class="ui">Time between frames</span>: as in your microscope metadata (the pixel size of the files as they are; resizing is corrected for automatically).</li>
+  <li>Keep <span class="ui">Resize frames to 512 x 512</span> and <span class="ui">Correct stage drift</span> ticked. Untick <span class="ui">Organoids are darker than the background</span> only for fluorescence videos with bright organoids.</li>
+  <li>Tick the videos to analyse in the <span class="ui">Use</span> column (all by default) and click <span class="ui">Save project</span>.</li>
+</ol>
+<figure><img src="images/org_standard_tab1.png"><figcaption>Figure 1. Tab 1 with the organoid video selected.</figcaption></figure>
+<div class="tip"><b>Tip</b>Start with 2 - 3 videos: run Stage 1, check the outlines on tab 4, adjust <span class="ui">Advanced settings...</span> if needed, then run all videos.</div>
+
+<h3>4.2 Sample information (tab 2)</h3>
+<p>Each row is a video. The <b>Condition</b> (e.g. the drug and dose) is what the analysis compares; <b>Genotype</b>, <b>Patient / batch</b> and <b>Marker</b> are optional.</p>
+<ul>
+  <li><span class="ui">Guess from video names</span> fills empty conditions from names such as <code>C10 6 µM Cisplatin Cytotox 2</code> (the well <code>C10</code> and replicate <code>2</code> are dropped; with marker videos the last word is the marker). Always check the result.</li>
+  <li>Double-click a cell to edit it, or select several rows (Ctrl / Shift + click) and use <span class="ui">Set value for selected rows...</span>.</li>
+  <li><span class="ui">Import table (.csv)...</span> reads a table with the video name in the first column and columns <code>Condition</code>, <code>Genotype</code>, <code>Patient</code>, <code>Marker</code>.</li>
+  <li>Click <span class="ui">Save sample table</span> (it is saved to <code>metadata_expt.csv</code> in the results folder).</li>
+</ul>
+<figure><img src="images/org_standard_tab2.png"><figcaption>Figure 2. Tab 2: the condition of each video.</figcaption></figure>
+
+<h3>4.3 Run the pipeline (tab 3)</h3>
+<ol class="steps">
+  <li>Tick the steps to run: all of them for a complete run, or <span class="ui">Stage 1 only</span> to check the segmentation first.</li>
+  <li>Keep <span class="ui">Skip steps already completed (resume)</span> ticked: finished steps are not recomputed, so you can stop a run and continue later.</li>
+  <li>Click <span class="ui">Run selected steps</span>. The table shows the status of every step of every video; the log below gives the details.</li>
+</ol>
+<table>
+  <tr><th style="width:16%">Symbol</th><th>Meaning</th></tr>
+  <tr><td>&#10003;</td><td>done</td></tr>
+  <tr><td>&middot;</td><td>to do</td></tr>
+  <tr><td>&#9654; running</td><td>being computed now</td></tr>
+  <tr><td>0 org.</td><td>no organoids were found in this video (it is left out of the analysis)</td></tr>
+  <tr><td>&#10227;</td><td>settings changed since it was computed: it is recomputed on the next run, even with <i>Skip steps already completed</i> ticked</td></tr>
+  <tr><td>&#10007; failed</td><td>an error occurred: the red lines of the log say why; the other videos continue</td></tr>
+</table>
+<figure><img src="images/org_standard_tab3.png"><figcaption>Figure 3. Tab 3 after a complete run of all steps.</figcaption></figure>
+<p>As a guide, for the 1-video example on a CPU: preparing took under a minute, detection about 3 minutes (much less on a GPU), tracking, segmentation and clean-up under half a minute each, and the SAM features a few minutes. <span class="ui">Stop</span> ends a run; the step running at that moment is lost, finished steps are kept.</p>
+
+<h3>4.4 Check the segmentation (tab 4)</h3>
+<p>Choose a video and step through the frames with the slider, <span class="ui">&#9664;</span> / <span class="ui">&#9654;</span> or <span class="ui">Play</span>. Three layers can be drawn on top:</p>
+<ul>
+  <li><span class="ui">Final tracks</span>: the outlines used in the analysis, coloured and numbered by track;</li>
+  <li><span class="ui">Raw segmentation</span>: the U-Net outlines before clean-up;</li>
+  <li><span class="ui">Detected boxes</span>: the candidate boxes of the detector (brighter = more confident).</li>
+</ul>
+<figure><img src="images/org_standard_tab4.png"><figcaption>Figure 4. Tab 4: final organoid outlines on a frame of the video.</figcaption></figure>
+<div class="tip"><b>If organoids are missed or badly outlined</b> open <span class="ui">Advanced settings...</span> on tab 1. Lower the <i>Segmentation threshold</i> for larger outlines; lower <i>Min. track score</i> / <i>Min. track lifetime</i> to keep more organoids; increase the <i>Border width</i> to drop more organoids cut by the image edge. Then run again with <i>Skip steps already completed</i> ticked: only the steps affected by the changed settings (marked &#10227;) are recomputed.</div>
+
+<h3>4.5 Analysis and results (tab 5)</h3>
+<ol class="steps">
+  <li><span class="ui">Analysis name</span>: results go to <code>analysis/&lt;name&gt;</code>; use a new name to keep an earlier analysis.</li>
+  <li><span class="ui">Group by</span>: the sample information compared in the plots (usually <i>Condition</i>). <span class="ui">Batch</span> (optional): a column whose effect is regressed out, e.g. plate or experiment.</li>
+  <li><span class="ui">Phenotype map and clusters</span>: the map method (UMAP or PaCMAP), the number of clusters (<i>auto</i> or a number), the SAM module scale and the number of time bins.</li>
+  <li><span class="ui">Options</span>: keep the defaults (equal weighting of shape, appearance and motion; time-varying features only; HMM transitions). Tick <i>Also save figures as .svg</i> for publication figures.</li>
+  <li>Click <span class="ui">Run analysis</span>. It compiles the dataset first if needed. When it finishes, the results open on this tab: click a figure on the left to show it, double-click to open it (or a <code>.csv</code> table) in its own program.</li>
+</ol>
+<figure><img src="images/org_standard_tab5.png"><figcaption>Figure 5. Tab 5: the analysis settings (left) and the results browser (right) showing the phenotype map with organoid images.</figcaption></figure>
+<p>The line above the results summarises the analysis (number of organoid instances, features, modules and clusters). If a panel could not be made (e.g. too few organoids for the transitions), it is listed as <i>Not completed</i> and the rest of the analysis is still saved.</p>
+
+<!-- ============================================================== -->
+<h2 class="page">5. Tutorial B: a Cell Tracking Challenge dataset</h2>
+<p>The <a href="http://celltrackingchallenge.net">Cell Tracking Challenge</a> provides 2D and 3D time-lapse videos of cells with reference segmentations and tracks. SPOT can phenotype the cells of its 2D datasets, using the annotations instead of the networks. The same option analyses the results of <b>your own</b> segmentation and tracking, if you save them in the challenge format.</p>
+
+<h3>5.1 Get a dataset</h3>
+<p>Download a 2D training dataset, e.g. <b>PhC-C2DH-U373</b> (glioblastoma-astrocytoma cells on a polyacrylamide substrate, phase contrast, 2 sequences of 115 frames), from <code>http://data.celltrackingchallenge.net/training-datasets/PhC-C2DH-U373.zip</code>, and unzip it. A dataset folder looks like this:</p>
+<pre>PhC-C2DH-U373/
+  01/         t000.tif, t001.tif, ...          the frames of sequence 01
+  01_GT/TRA/  man_track000.tif, ..., man_track.txt   gold truth tracks (a marker per cell)
+  01_GT/SEG/  man_seg###.tif                    gold truth segmentation (some frames)
+  01_ST/SEG/  man_seg###.tif                    silver truth segmentation (all frames)
+  02/  02_GT/  02_ST/  ...                      sequence 02
+  (01_RES/    mask###.tif, res_track.txt        your own results, optional)</pre>
+
+<h3>5.2 Set up</h3>
+<ol class="steps">
+  <li>Under <span class="ui">What to analyse</span>, choose <span class="ui">Cell Tracking Challenge dataset (annotated cells)</span>. The video options are replaced by the Cell Tracking Challenge options, and the resize / drift options are switched off (the frames must stay aligned with the masks).</li>
+  <li><span class="ui">Dataset folder</span>: choose the dataset folder (<code>PhC-C2DH-U373</code>), or a folder containing several datasets. Every sequence is listed as <code>&lt;dataset&gt;-&lt;sequence&gt;</code>, with the track table it will use.</li>
+  <li><span class="ui">Cell outlines from</span>:
+    <ul>
+      <li><b>Best annotation</b> (recommended): for every tracked cell the silver truth segmentation, else the gold truth segmentation, else the gold truth tracking marker. Segmentation regions are matched to the tracks by their overlap with the tracking markers.</li>
+      <li><b>Gold truth tracking markers only</b>: the <code>TRA</code> masks; for many datasets these are only small markers inside each cell, not its outline.</li>
+      <li><b>My results</b>: the masks and <code>res_track.txt</code> in <code>&lt;sequence&gt;_RES</code>, e.g. from your own tracker.</li>
+    </ul></li>
+  <li><span class="ui">Min. track length</span>: shorter tracks are not analysed (default 5 frames).</li>
+  <li>Enter the <span class="ui">Pixel size</span> and <span class="ui">Time between frames</span> of the dataset. For PhC-C2DH-U373: <b>0.65 &micro;m</b> per pixel and <b>15 minutes = 0.25 hours</b>.</li>
+</ol>
+<figure><img src="images/ctc_standard_tab1.png"><figcaption>Figure 6. Tab 1 set up for the PhC-C2DH-U373 dataset: both sequences found with their gold truth track tables.</figcaption></figure>
+
+<h3>5.3 Sample information and run</h3>
+<p>On tab 2, <span class="ui">Guess from video names</span> sets the condition of every sequence to its dataset name (here <code>PhC-C2DH-U373</code>); with several datasets, compare them by <i>Condition</i>. On tab 3, <span class="ui">Detect</span>, <span class="ui">Track</span> and <span class="ui">Segment</span> are greyed out: they are not needed. The clean-up step is now <span class="ui">Outline the annotated cells, remove cells at the border</span> (column <i>Outlines</i>). Click <span class="ui">Run selected steps</span>.</p>
+<ul>
+  <li><b>Prepare</b> reads the frames as they are; 16-bit images are scaled to 8 bit between the 0.1 and 99.9 percentiles of the sequence.</li>
+  <li><b>Outlines</b> outlines every annotated cell of every track with 200 points, then removes cells touching the image border (<i>Border width / fraction</i> in Advanced settings) and tracks shorter than the minimum length. A track ends at a cell division: the daughter cells are new tracks, as in the challenge format.</li>
+  <li>The SAM phenome, compilation and analysis are exactly as for organoids.</li>
+</ul>
+<figure><img src="images/ctc_standard_tab3.png"><figcaption>Figure 7. Tab 3 for the Cell Tracking Challenge dataset: detection, tracking and segmentation are not needed.</figcaption></figure>
+<p>For PhC-C2DH-U373 the whole run took about a minute and a half on a 32-core workstation: 7 and 8 cell tracks are kept in sequences 01 and 02, giving 1074 cell instances.</p>
+
+<h3>5.4 Check the outlines and results</h3>
+<p>On tab 4, <span class="ui">Final tracks</span> shows the outlines that are analysed; <span class="ui">Raw segmentation</span> shows every annotated outline before the cells at the border were removed.</p>
+<figure><img src="images/ctc_standard_tab4.png"><figcaption>Figure 8. Tab 4: outlines of the annotated U373 cells (silver truth segmentation matched to the gold truth tracks).</figcaption></figure>
+<figure><img src="images/ctc_standard_tab5.png"><figcaption>Figure 9. Tab 5: representative cells of each phenotype cluster of the U373 dataset.</figcaption></figure>
+
+<!-- ============================================================== -->
+<h2 class="page">6. Reading the results</h2>
+<p>Everything is saved in the results folder. The analysis folder <code>analysis/&lt;name&gt;</code> contains:</p>
+<table>
+  <tr><th style="width:30%">Folder / file</th><th>Contents</th></tr>
+  <tr><td><code>00_feature_overview</code></td><td>How much shape, appearance and motion each contribute.</td></tr>
+  <tr><td><code>01_SAM_modules</code></td><td>SAM modules: groups of co-varying features, their feature contributions, module scores on the map and the most representative objects of each module.</td></tr>
+  <tr><td><code>02_phenotype_map</code></td><td>The 2D phenotype map of all object instances coloured by group, time and key features, and with the object images.</td></tr>
+  <tr><td><code>03_condition_density</code></td><td>Where each group lies on the map.</td></tr>
+  <tr><td><code>04_phenotype_clusters</code></td><td>Phenotype clusters (ordered by elongation), the choice of their number, representative objects, module signature and proportions per group.</td></tr>
+  <tr><td><code>05_time_course</code></td><td>Cluster composition over time for each group.</td></tr>
+  <tr><td><code>06_phenotype_trajectories</code></td><td>The average phenotype trajectory of each group on the map and their similarity.</td></tr>
+  <tr><td><code>07_phenotype_transitions</code></td><td>Hidden Markov model transition matrix and graph between clusters, and the transition entropy per group.</td></tr>
+  <tr><td><code>08_markers</code></td><td>Marker measurements on the map and per group / cluster (paired marker videos only).</td></tr>
+  <tr><td><code>organoid_phenotypes.csv</code></td><td>One row per object and time point: sample information, map coordinates, cluster, module scores and marker values. Use it for your own statistics.</td></tr>
+  <tr><td><code>normalised_SAM_features.csv</code></td><td>The normalised SAM features used in the analysis.</td></tr>
+</table>
+<p>The results folder also holds the compiled dataset tables <code>&lt;dataset&gt;_{shape,image,motion,marker}_features.csv</code>, the object outlines and image patches (<code>.mat</code>), and one folder per video under <code>videos/</code> with the intermediate results of every step.</p>
+
+<h2>7. Reproducibility, resuming and the command line</h2>
+<ul>
+  <li><b>Projects</b>: the settings are saved as <code>spot_project.json</code> in the results folder. <span class="ui">Open project...</span> reopens it, also after the results folder was moved.</li>
+  <li><b>Run history</b>: every run writes <code>run_history/&lt;date-time&gt;/</code> with the complete settings (<code>run_config.json</code>), the sample table, the log and the versions of SPOT, Python, the main packages, the GPU and the network weights. <span class="ui">Run history...</span> on tab 3 opens it.</li>
+  <li><b>Load settings...</b> takes a <code>spot_project.json</code>, a <code>run_config.json</code> or an <code>analysis_config.json</code>, either reopening its folders or applying its settings to the current project, and can restore its sample table. Results computed with other settings are then marked &#10227;.</li>
+  <li><b>Command line</b>: the same pipeline runs without the GUI, e.g. on a server:
+<pre>python gui/spot_pipeline.py --config &lt;results folder&gt;/spot_project.json --steps prepare,detect,track,segment,postprocess,features,markers,compile,analysis</pre>
+  Steps that do not apply (e.g. detection for a Cell Tracking Challenge dataset) are skipped.</li>
+</ul>
+
+<h2>8. Themes</h2>
+<p>The <span class="ui">Theme</span> menu at the top right changes the colours of the window: <b>Standard</b> (the system look), <b>Pink Panther</b> and <b>Forest Green</b>. The choice is remembered for the next session. Themes change only the window, not the result figures.</p>
+<div class="three">
+  <figure><img src="images/org_standard_tab3.png"><figcaption>Standard</figcaption></figure>
+  <figure><img src="images/org_pinkpanther_tab3.png"><figcaption>Pink Panther</figcaption></figure>
+  <figure><img src="images/org_forestgreen_tab3.png"><figcaption>Forest Green</figcaption></figure>
+</div>
+<div class="two">
+  <figure><img src="images/ctc_pinkpanther_tab1.png"><figcaption>Pink Panther: setting up a Cell Tracking Challenge dataset.</figcaption></figure>
+  <figure><img src="images/ctc_forestgreen_tab5.png"><figcaption>Forest Green: the results browser.</figcaption></figure>
+</div>
+
+<h2>9. Troubleshooting</h2>
+<table>
+  <tr><th style="width:34%">Problem</th><th>What to do</th></tr>
+  <tr><td>No videos found</td><td>Check the <i>File types</i>; with marker videos, check that the brightfield names end with the given text (e.g. <code> BF</code>). For a Cell Tracking Challenge dataset, choose the dataset folder that contains <code>01</code>, <code>02</code>, ...</td></tr>
+  <tr><td>"(no track table!)" next to a sequence</td><td>The sequence has no <code>&lt;seq&gt;_GT/TRA/man_track.txt</code> (or no <code>&lt;seq&gt;_RES/res_track.txt</code> with <i>My results</i>). Test datasets of the challenge come without annotations and cannot be used.</td></tr>
+  <tr><td>A step shows &#10007; failed</td><td>Read the red lines of the log on tab 3. The full log is in <code>run_history/&lt;date-time&gt;/log.txt</code>.</td></tr>
+  <tr><td>"the previous step has not been run"</td><td>Each step needs the one before it: tick the earlier steps too.</td></tr>
+  <tr><td>A video shows 0 org.</td><td>No organoid was left after clean-up. Check it on tab 4 (<i>Detected boxes</i>, <i>Raw segmentation</i>) and adjust the Advanced settings.</td></tr>
+  <tr><td><i>Not completed: ...</i> on tab 5</td><td>One panel of the analysis could not be made, usually because there are too few objects or time points for it; the others are saved. The reason is in the log.</td></tr>
+  <tr><td>The networks are slow</td><td>Set <i>Device for the networks</i> to <code>cuda</code> if you have an NVIDIA GPU with a CUDA build of PyTorch.</td></tr>
+</table>
+
+</body>
+</html>
