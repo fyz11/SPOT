@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Graphical interface** (`gui/`): runs the full workflow (Stages 1-3) on a folder of organoid videos without code, with run records for reproducibility and a command-line mode. Also analyses Cell Tracking Challenge datasets (annotations or your own results in the challenge format). Themes: Standard, Pink Panther, Forest Green. Tutorial: `gui/SAM-SPOT_GUI_tutorial.pdf`.
+
+### Fixed
+- `find_representative_images_per_cluster_PCA`: no longer crashes when a selected patch is larger than the mosaic cell (the cell grows to fit); clusters with fewer objects than mosaic cells leave cells empty (index -1, nan coordinates, size 0); colour patches and single-object clusters are handled.
+- `compute_most_representative_image_patches`: handles fewer objects than mosaic cells, colour patches and a single SAM module.
+
 ## 2.0.0 (Oct 2026)
 
 > **Compatibility.** Several defaults changed, so the default features differ from version 0.1.1. To compare with features computed by earlier SPOT versions, use the [`legacy`](https://github.com/fyz11/SPOT/tree/legacy) branch, the [`v0.1.1-natcomm`](https://github.com/fyz11/SPOT/releases/tag/v0.1.1-natcomm) release or `pip install SAM-SPOT==0.1.1`. Or restore the previous behaviour per function:

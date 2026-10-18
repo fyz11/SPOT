@@ -27,6 +27,7 @@ SPOT turns movies of moving, changing objects (cells, organoids, ...) into a sta
   + [Regressing out confounders](#regressing-out-confounders)
   + [SAM module selection](#sam-module-selection)
 * [Pretrained networks for organoid detection and segmentation](#pretrained-networks-for-organoid-detection-and-segmentation)
+* [Graphical interface](#graphical-interface)
 * [Example scripts](#example-scripts)
 * [To install](#to-install)
 * [Associated papers](#associated-papers)
@@ -43,7 +44,7 @@ conda activate SAM-SPOT_env
 conda install -c conda-forge python-annoy
 pip install SAM-SPOT
 ```
-Then open the demo notebook [`examples/SPOT_demo_new_features.ipynb`](https://github.com/fyz11/SPOT/blob/main/examples/SPOT_demo_new_features.ipynb): a few minutes, no data download, it walks through feature extraction, normalisation, weighting, confound regression, rotation invariance, SAM modules and UMAP / PaCMAP embeddings on a synthetic movie. More installation options: [To install](#to-install).
+Then open the demo notebook [`examples/SPOT_demo_new_features.ipynb`](https://github.com/fyz11/SPOT/blob/main/examples/SPOT_demo_new_features.ipynb): a few minutes, no data download, it walks through feature extraction, normalisation, weighting, confound regression, rotation invariance, SAM modules and UMAP / PaCMAP embeddings on a synthetic movie. More installation options: [To install](#to-install). Prefer not to code? Use the [graphical interface](#graphical-interface).
 
 <!-- TOC --><a name="whats-new"></a>
 ## What's new
@@ -222,6 +223,14 @@ detector_h5 = get_pretrained_weights('yolov3_organoid_detector', torch=False)  #
 segmenter_pt = get_pretrained_weights('attn_unet_organoid_segmentation')
 ```
 The PyTorch loaders (`load_and_run_YOLOv3_weights_torch_detection_model_RGB`, `load_torch_segmentation_model`) use them when no weights file is given. For the Keras examples, copy the detector to `models/detect_CNN_model/`.
+
+<!-- TOC --><a name="graphical-interface"></a>
+## Graphical interface
+The point-and-click SAM-SPOT GUI ([`gui/`](https://github.com/fyz11/SPOT/tree/main/gui)) runs the whole workflow without writing code: from a folder of organoid videos (detection, tracking, segmentation, SAM phenome, compilation) to the analysis figures (SAM modules, phenotype map, clusters, trajectories, transitions). It also analyses annotated [Cell Tracking Challenge](http://celltrackingchallenge.net) datasets, or your own tracking results in the same format. Every run is recorded for reproducibility and can be repeated from the command line.
+```shell
+python gui/spot_gui.py
+```
+Step-by-step tutorial with screenshots: [SAM-SPOT_GUI_tutorial.pdf](https://github.com/fyz11/SPOT/blob/main/gui/SAM-SPOT_GUI_tutorial.pdf); details in the [GUI README](https://github.com/fyz11/SPOT/blob/main/gui/README.md).
 
 <!-- TOC --><a name="example-scripts"></a>
 ## Example scripts
