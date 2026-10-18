@@ -10,7 +10,7 @@
 SPOT turns movies of moving, changing objects (cells, organoids, ...) into a standardised **Shape, Appearance and Motion (SAM) phenome** per object and time point, and analyses it like single-cell sequencing data: embeddings, phenotype clusters, trajectories and **SAM modules** of co-varying features. It is push-and-go: no prior knowledge of the objects' behaviour is needed.
 
 <p align="center">
-  <img src="https://github.com/fyz11/SPOT/blob/main/docs/pictures/main_workflow.jpg" width=100%/>
+  <img src="https://raw.githubusercontent.com/fyz11/SPOT/main/docs/pictures/main_workflow.jpg" width=100%/>
 </p>
 
 <!-- TOC start -->
@@ -43,11 +43,11 @@ conda activate SAM-SPOT_env
 conda install -c conda-forge python-annoy
 pip install SAM-SPOT
 ```
-Then open the demo notebook [`examples/SPOT_demo_new_features.ipynb`](examples/SPOT_demo_new_features.ipynb): a few minutes, no data download, it walks through feature extraction, normalisation, weighting, confound regression, rotation invariance, SAM modules and UMAP / PaCMAP embeddings on a synthetic movie. More installation options: [To install](#to-install).
+Then open the demo notebook [`examples/SPOT_demo_new_features.ipynb`](https://github.com/fyz11/SPOT/blob/main/examples/SPOT_demo_new_features.ipynb): a few minutes, no data download, it walks through feature extraction, normalisation, weighting, confound regression, rotation invariance, SAM modules and UMAP / PaCMAP embeddings on a synthetic movie. More installation options: [To install](#to-install).
 
 <!-- TOC --><a name="whats-new"></a>
 ## What's new
-**Oct 2026: version 2.0** (full list and compatibility notes: [CHANGELOG.md](CHANGELOG.md))
+**Oct 2026: version 2.0** (full list and compatibility notes: [CHANGELOG.md](https://github.com/fyz11/SPOT/blob/main/CHANGELOG.md))
 - **Faster:** an optimised implementation is now the default (`fast=True`, parallel with `n_jobs`), plus `*_torch` GPU variants, all with the same outputs. [More](#faster-extraction)
 - **Masked appearance and motion** by default (`use_mask=True`): they describe only the object interior and no longer leak shape. [More](#masked-appearance-and-motion-features)
 - **Directional motion descriptors** by default (`directional_motion_sift=True`): the flow direction and the sign of curl / divergence are kept, and shear gets its principal axis. [More](#computing-the-phenome)
@@ -72,7 +72,7 @@ Then open the demo notebook [`examples/SPOT_demo_new_features.ipynb`](examples/S
 Dynamic objects constantly change their behaviour. We hypothesise that three measurable properties, **Shape, Appearance and Motion**, together characterise the instantaneous phenotypic state of any object. SPOT computes one generalised SAM feature set for every object at every time point, like a transcriptome in single-cell sequencing, covering global, (local) regional and (local) distribution features:
 
 <p align="center">
-  <img src="https://github.com/fyz11/SPOT/blob/main/docs/pictures/SAM_motivation2.jpg" width=100%/>
+  <img src="https://raw.githubusercontent.com/fyz11/SPOT/main/docs/pictures/SAM_motivation2.jpg" width=100%/>
 </p>
 
 | SAM set | feature families (feature name prefix) |
@@ -225,7 +225,7 @@ The PyTorch loaders (`load_and_run_YOLOv3_weights_torch_detection_model_RGB`, `l
 
 <!-- TOC --><a name="example-scripts"></a>
 ## Example scripts
-Start with the demo [`examples/SPOT_demo_new_features.ipynb`](examples/SPOT_demo_new_features.ipynb) (or `examples/SPOT_demo_new_features.py`). Scripts for every step of the workflow, on the example data in `data/`, are in `examples/`; a detailed guide is the [Getting Started word document](https://github.com/fyz11/SPOT/blob/main/Getting%20Started%20with%20SPOT.docx).
+Start with the demo [`examples/SPOT_demo_new_features.ipynb`](https://github.com/fyz11/SPOT/blob/main/examples/SPOT_demo_new_features.ipynb) (or `examples/SPOT_demo_new_features.py`). Scripts for every step of the workflow, on the example data in `data/`, are in `examples/`; a detailed guide is the [Getting Started word document](https://github.com/fyz11/SPOT/blob/main/Getting%20Started%20with%20SPOT.docx).
 
 | stage | scripts (`examples/`) |
 |---|---|
