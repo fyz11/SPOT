@@ -65,7 +65,7 @@ def show(fig, name):
 # SPOT tracking / segmentation stage.
 
 # %%
-def make_movie(n_per_type=20, T=10, cell=64, n_pts=200, seed=0):
+def make_movie(n_per_type=20, T=10, cell=64, n_pts=200, seed=0, same_texture=False):
     rng = np.random.default_rng(seed)
     types = np.repeat(['round', 'elongated', 'lobed'], n_per_type)
     rng.shuffle(types)
@@ -79,7 +79,7 @@ def make_movie(n_per_type=20, T=10, cell=64, n_pts=200, seed=0):
     cells = []
     for i, kind in enumerate(types):
         row, col = divmod(i, n_cols)
-        tex = textures[kind](rng)
+        tex = textures['round' if same_texture else kind](rng)  # same_texture: only the shape and motion differ
         cells.append(dict(kind=kind, center=np.array([(row + 0.5) * cell, (col + 0.5) * cell]),
                           size=rng.uniform(0.8, 1.2), angle=rng.uniform(0, 2 * np.pi), tex=tex / tex.std(),
                           gain=rng.uniform(0.75, 1.25),  # illumination: a nuisance unrelated to the phenotype
@@ -189,30 +189,33 @@ else:
 
 # %% [markdown]
 # ## 2. Masked vs unmasked appearance
-# With `use_mask=False` (the original SAM features) Haralick and SIFT are computed on the bounding box crop and also
-# describe the outline. How well can the cell **shape** (its elongation, major / minor axis ratio) be predicted from the **appearance** features
-# alone? (cross-validated R^2, grouped by cell)
+# With `use_mask=False` (the original SAM features) Haralick and SIFT are computed on the bounding box crop, so they also
+# describe the outline. To see this, make the same movie with **the same texture in every cell**: the phenotypes then
+# differ only in shape and motion, and appearance should not be able to tell them apart. Cross-validated accuracy
+# (grouped by cell) of classifying the phenotype from the appearance features alone (chance = 0.33):
 
 # %%
-from sklearn.linear_model import RidgeCV  # noqa: E402
+from sklearn.linear_model import LogisticRegression  # noqa: E402
 from sklearn.model_selection import GroupKFold, cross_val_score  # noqa: E402
 from sklearn.pipeline import make_pipeline  # noqa: E402
 from sklearn.preprocessing import StandardScaler  # noqa: E402
 
-app_unmasked, _, _ = SPOT_features.compute_boundary_texture_features(vid, boundaries, use_mask=False, n_jobs=N_JOBS)
-ecc = shape_feats[..., list(shape_names).index('major_minor_axis_ratio')].ravel()
-groups = np.repeat(np.arange(len(boundaries)), T)
+vid_same, masks_same, boundaries_same, meta_same = make_movie(same_texture=True)
+kind_rows = np.repeat(meta_same['kind'].to_numpy(), T)
+cell_rows = np.repeat(np.arange(len(boundaries_same)), T)
 
 
-def shape_from_appearance(A):
+def phenotype_from_appearance(A):
     A = np.nan_to_num(A.reshape(-1, A.shape[-1]))
-    keep = A.std(0) > 0
-    model = make_pipeline(StandardScaler(), RidgeCV(alphas=np.logspace(-2, 4, 13)))
-    return cross_val_score(model, A[:, keep], ecc, groups=groups, cv=GroupKFold(4), scoring='r2').mean()
+    A = A[:, A.std(0) > 0]
+    model = make_pipeline(StandardScaler(), LogisticRegression(C=0.1, max_iter=2000))
+    return cross_val_score(model, A, kind_rows, groups=cell_rows, cv=GroupKFold(4)).mean()
 
 
-print('elongation predicted from appearance: R^2 unmasked %.2f, masked %.2f'
-      % (shape_from_appearance(app_unmasked), shape_from_appearance(app_feats)))
+for use_mask in (False, True):
+    A, _, _ = SPOT_features.compute_boundary_texture_features(vid_same, boundaries_same, use_mask=use_mask,
+                                                              masks=masks_same if use_mask else None, n_jobs=N_JOBS)
+    print('use_mask=%s: phenotype accuracy from appearance %.2f' % (use_mask, phenotype_from_appearance(A)))
 
 # %% [markdown]
 # ## 3. Normalisation and equal weighting of the SAM sets and feature families
