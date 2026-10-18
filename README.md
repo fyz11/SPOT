@@ -112,6 +112,16 @@ motion, motion_names, _ = SPOT_SAM_features.compute_boundary_motion_features(flo
 ```
 The elliptic Fourier descriptors (`elliptic_fourier_features=True`, `elliptic_fourier_order=10`) and the shear-rate features (`shear_features=True`) are on by default, with the same names and order as the PyPI 0.1.1 build; set them to `False` for the features without them.
 
+**Directional motion descriptors** (`directional_motion_sift=True`, off by default). The default motion SIFT descriptors run gradient-based SIFT on the flow *magnitude*, curl, divergence and shear-rate images, so they lose the flow direction and the sign of curl and divergence. With the flag, these blocks are replaced in the same position by:
+
+| block | descriptor | name |
+|---|---|---|
+| flow | the flow vectors used directly as SIFT's gradient field: orientation = flow direction (128-d) | `flow_vector_sift_*` |
+| curl, divergence | sign aware: the mean positive and negative part in each of the 16 spatial cells (32-d) | `curl_signed_*`, `div_signed_*` |
+| shear | SIFT of the principal stretching axis of the strain rate, angle doubled as it is an axis (128-d) | `shear_axis_sift_*` |
+
+They are masked / unmasked as the other SIFT descriptors; `directional_sift_sigma=1.` smooths the fields first.
+
 <!-- TOC --><a name="masked-appearance-and-motion-features"></a>
 ### Masked appearance and motion features
 By default (`use_mask=True`):

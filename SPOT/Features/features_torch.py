@@ -793,7 +793,9 @@ def compute_boundary_motion_features_torch(vid_flow,
                                            masked_sift_resize='cap',
                                            masks=None,
                                            device=None,
-                                           shear_features=True):
+                                           shear_features=True,
+                                           directional_motion_sift=False,
+                                           directional_sift_sigma=1.):
     """ PyTorch variant of SPOT.Features.features.compute_boundary_motion_features with the same parameters and outputs.
 
     Curl and divergence (once per frame), the contour masks and regional windows (identical rasterisation) and the
@@ -823,7 +825,8 @@ def compute_boundary_motion_features_torch(vid_flow,
                 compute_contour_feats=compute_contour_feats, n_contour_feat_bins=n_contour_feat_bins,
                 cnt_sigma=cnt_sigma, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start,
                 pixel_res=pixel_res, time_res=time_res, compute_sift_feats=compute_sift_feats, siftshape=siftshape,
-                use_mask=use_mask, masked_sift_resize=masked_sift_resize, shear_features=shear_features)
+                use_mask=use_mask, masked_sift_resize=masked_sift_resize, shear_features=shear_features,
+                directional_motion_sift=directional_motion_sift, directional_sift_sigma=directional_sift_sigma)
     samples = _valid_samples(boundaries, frames, need_next=True)
     contours = [boundaries[b][tt] for b, jj, tt in samples]
     fg = lambda tt: (np.asarray(masks[tt]) > 0) if (use_mask and masks is not None) else None
@@ -846,7 +849,7 @@ def compute_boundary_motion_features_torch(vid_flow,
 
     siftextractor = sf.SingleSiftExtractor(siftshape[0])
     # pass 1: the images of the unmasked SIFT descriptors, batched on the device
-    if (compute_all_feats or compute_sift_feats) and not use_mask:
+    if (compute_all_feats or compute_sift_feats) and not use_mask and not directional_motion_sift:
         sift_ims, sift_k = [], []
         for tt in sorted(by_frame):
             flow_frame, curl, div, shear = frame_fields(tt)

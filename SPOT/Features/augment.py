@@ -152,11 +152,16 @@ def _feature_family(feature_fn):
     raise ValueError('feature_fn must be a SAM feature function (shape, appearance or motion)')
 
 
-# the SIFT descriptors of the SAM features, named <prefix><bin>, bin = 1 .. 128
-SIFT_PREFIXES = ('sift_appear_', 'sift_motion_', 'curl_sift_', 'div_sift_', 'shear_sift_')
+# the SIFT-like descriptors of the SAM features, named <prefix><bin>: prefix -> (n_channels, channel shift per quarter
+# turn). Gradient SIFT and the flow vector SIFT (the flow rotates with the image): 8 orientations, +2; the shear axis
+# SIFT (doubled angles): +4; the signed curl / divergence descriptors (positive / negative part): 2 channels, no shift.
+DESCRIPTOR_SPECS = {'sift_appear_': (8, 2), 'sift_motion_': (8, 2), 'curl_sift_': (8, 2), 'div_sift_': (8, 2),
+                    'shear_sift_': (8, 2), 'flow_vector_sift_': (8, 2), 'shear_axis_sift_': (8, 4),
+                    'curl_signed_': (2, 0), 'div_signed_': (2, 0)}
+SIFT_PREFIXES = tuple(DESCRIPTOR_SPECS)
 
 
-def sift_quarter_turn_permutation(use_mask=True, n_angles=8, n_cells=(4, 4)):
+def sift_quarter_turn_permutation(use_mask=True, n_angles=8, n_cells=(4, 4), angle_shift=None):
     """ The permutation of the SIFT descriptor bins of the SAM features under a quarter turn of the image (np.rot90):
     desc(np.rot90(im))[j] == desc(im)[P[j]].
 
@@ -175,16 +180,23 @@ def sift_quarter_turn_permutation(use_mask=True, n_angles=8, n_cells=(4, 4)):
         number of orientation bins (divisible by 4)
     n_cells : (int, int)
         (rows, cols) of the unmasked grid (square) or (n_rings, n_sectors) of the masked cells (n_sectors divisible by 4)
+    angle_shift : None or int
+        the shift of the channel (orientation) index per quarter turn; None = n_angles / 4 (gradient SIFT). The other
+        descriptors of DESCRIPTOR_SPECS use their own (e.g. 4 for the doubled-angle shear axis, 0 for signed channels).
 
     Returns
     -------
     P : (n_angles * n_cells[0] * n_cells[1],) int array
     """
     n1, n2 = n_cells
-    if n_angles % 4 or (use_mask and n2 % 4) or (not use_mask and n1 != n2):
+    if angle_shift is None:
+        if n_angles % 4:
+            raise ValueError('the descriptor is not closed under quarter turns')
+        angle_shift = n_angles // 4
+    if (use_mask and n2 % 4) or (not use_mask and n1 != n2):
         raise ValueError('the descriptor is not closed under quarter turns')
     a, c1, c2 = np.unravel_index(np.arange(n_angles * n1 * n2), (n_angles, n1, n2))
-    a = (a + n_angles // 4) % n_angles
+    a = (a + angle_shift) % n_angles
     if use_mask:
         c2 = (c2 + n2 // 4) % n2
     else:
@@ -192,11 +204,11 @@ def sift_quarter_turn_permutation(use_mask=True, n_angles=8, n_cells=(4, 4)):
     return np.ravel_multi_index((a, c1, c2), (n_angles, n1, n2))
 
 
-def sift_rotation_orbits(use_mask=True, n_angles=8, n_cells=(4, 4)):
+def sift_rotation_orbits(use_mask=True, n_angles=8, n_cells=(4, 4), angle_shift=None):
     """ The orbits of the SIFT descriptor bins under quarter turns: (n_bins,) int array of orbit ids 0 .. n_orbits-1,
     numbered by their lowest bin. Features averaged over a set of angles closed under +90 degrees (e.g. n_rotations=4 or
     8) are (up to resampling) equal within an orbit. """
-    P = sift_quarter_turn_permutation(use_mask, n_angles, n_cells)
+    P = sift_quarter_turn_permutation(use_mask, n_angles, n_cells, angle_shift)
     orbit = -np.ones(len(P), dtype=np.int64)
     n = 0
     for j in range(len(P)):
@@ -237,12 +249,13 @@ def collapse_sift_orbits(feats, labels, norm_bool=None, use_mask=True):
         idx = idx[[labels[i][len(prefix):].isdigit() for i in idx]]
         if len(idx) == 0:
             continue
+        n_ch, shift = DESCRIPTOR_SPECS[prefix]
         bins = np.array([int(labels[i][len(prefix):]) - 1 for i in idx])
         n_bins = int(bins.max()) + 1
-        if len(idx) != n_bins or n_bins % 32:
-            raise ValueError('%s: expected a full 8 x 16 (or 8 x 4k) descriptor' % prefix)
-        n_cells = (4, n_bins // 32) if use_mask else (int(round(np.sqrt(n_bins // 8))),) * 2
-        orbit = sift_rotation_orbits(use_mask, 8, n_cells)[bins]
+        if len(idx) != n_bins or n_bins % (4 * n_ch):
+            raise ValueError('%s: expected a full %d x 16 (or %d x 4k) descriptor' % (prefix, n_ch, n_ch))
+        n_cells = (4, n_bins // (4 * n_ch)) if use_mask else (int(round(np.sqrt(n_bins // n_ch))),) * 2
+        orbit = sift_rotation_orbits(use_mask, n_ch, n_cells, shift)[bins]
         keep[idx] = False
         for o in range(orbit.max() + 1):
             members = idx[orbit == o]

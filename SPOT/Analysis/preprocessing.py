@@ -445,6 +445,10 @@ SAM_FEATURE_GROUPS = [
     ('motion', 'curl SIFT', lambda n: n.startswith('curl_sift_')),
     ('motion', 'divergence SIFT', lambda n: n.startswith('div_sift_')),
     ('motion', 'shear SIFT', lambda n: n.startswith('shear_sift_')),
+    ('motion', 'flow vector SIFT', lambda n: n.startswith('flow_vector_sift_')),
+    ('motion', 'curl signed', lambda n: n.startswith('curl_signed_')),
+    ('motion', 'divergence signed', lambda n: n.startswith('div_signed_')),
+    ('motion', 'shear axis SIFT', lambda n: n.startswith('shear_axis_sift_')),
 ]
 
 

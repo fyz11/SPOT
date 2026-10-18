@@ -1546,6 +1546,143 @@ def _masked_sift_descriptor(im, mask, resize='cap', siftshape=(64,64), n_rings=4
     return sift_texture
 
 
+# =============================================================================
+#   Directional / sign-aware motion descriptors (directional_motion_sift=True)
+# =============================================================================
+def _masked_resize(field, mask, resize='cap', siftshape=(64,64)):
+    """ resize a (n_rows, n_cols[, n_channels]) field and its mask as _masked_sift_descriptor does """
+    import skimage.transform as sktform
+    mask_rs = mask > 0
+    if resize == 'square':
+        out_shape = tuple(siftshape)
+    elif resize == 'cap':
+        scale = min(1., max(siftshape) / float(max(mask_rs.shape)))
+        out_shape = tuple(max(1, int(round(s*scale))) for s in mask_rs.shape)
+    elif resize == 'native':
+        out_shape = mask_rs.shape
+    else:
+        raise ValueError("resize must be 'cap', 'square' or 'native'")
+    field = np.asarray(field, dtype=np.float64)
+    if out_shape != mask_rs.shape:
+        field = sktform.resize(field, out_shape + field.shape[2:], preserve_range=True)
+        mask_rs = sktform.resize(mask_rs.astype(np.float64), out_shape, order=0, preserve_range=True, anti_aliasing=False) > 0
+    return field, mask_rs
+
+
+def _ring_sector_cells(mask_rs, n_rings=4, n_sectors=4):
+    """ the shape-adapted cell (ring * n_sectors + sector) of every mask pixel, as in _masked_sift_descriptor """
+    depth = ndimage.distance_transform_edt(mask_rs)[mask_rs]
+    ring = np.digitize(depth, np.quantile(depth, np.linspace(0, 1, n_rings+1)[1:-1]))
+    yy, xx = np.nonzero(mask_rs)
+    angle = np.arctan2(yy - yy.mean(), xx - xx.mean())
+    sector = np.floor((angle + np.pi) / (2*np.pi) * n_sectors).astype(np.int64) % n_sectors
+    return ring * n_sectors + sector
+
+
+def _grid_pool(maps, patch_size):
+    """ weighted mean of (n_channels, patch_size, patch_size) maps over the 4 x 4 SIFT cells (bilinear cell weights of
+    DsiftExtractor), (n_channels, 16) """
+    weights = SingleSiftExtractor(patch_size).weights  # (16, patch_size**2)
+    maps = np.asarray(maps).reshape(len(maps), -1)
+    return maps.dot(weights.T) / weights.sum(axis=1)[None, :]
+
+
+def _orientation_energies(vx, vy, n_angles=8, alpha=9.):
+    """ SIFT's orientation binning (magnitude * max(cos(theta - angle), 0)**alpha) applied to a vector field (vx, vy) in
+    image (x = column, y = row) coordinates, (n_angles,) + vx.shape """
+    angles = np.arange(n_angles) * 2. * np.pi / n_angles
+    mag = np.sqrt(vx**2 + vy**2)
+    theta = np.arctan2(vy, vx)
+    return np.array([mag * np.maximum(np.cos(theta - a), 0)**alpha for a in angles])
+
+
+def _lowe_normalise(d, clip=0.2):
+    n = np.linalg.norm(d)
+    if n <= 1e-12:
+        return np.zeros_like(d)
+    d = np.minimum(d / n, clip)
+    return d / (np.linalg.norm(d) + 1e-8)
+
+
+def _shear_axis_field(flow):
+    """ the deviatoric strain rate of a (n_rows, n_cols, 2) flow as the vector field (2 Dxx, 2 Exy): its magnitude is the
+    shear rate (_shear_vector_flow) and its angle is twice the principal stretching axis (axial, so angles are doubled) """
+    dFx_dy, dFx_dx = np.gradient(flow[..., 0])
+    dFy_dy, dFy_dx = np.gradient(flow[..., 1])
+    return np.dstack([dFx_dx - dFy_dy, dFx_dy + dFy_dx])
+
+
+def _vector_sift_descriptor(field, mask, use_mask=True, resize='cap', siftshape=(64,64), sigma=1.):
+    """ SIFT descriptor of a vector field used directly as the gradient field: orientation = vector direction, magnitude
+    = vector length. (n_rows, n_cols, 2) field in (x, y) components. Unmasked: the exterior is set to 0 and the field
+    resized to siftshape, 4 x 4 grid; masked: pixels inside the mask (the field outside is only used for smoothing),
+    pooled over shape-adapted ring x sector cells. 128-d, Lowe normalised. """
+    import skimage.transform as sktform
+    field = np.asarray(field, dtype=np.float64)
+    if use_mask:
+        field, mask_rs = _masked_resize(field, mask, resize, siftshape)
+        if mask_rs.sum() == 0:
+            return np.zeros(8 * 16)
+        if sigma:
+            field = np.dstack([ndimage.gaussian_filter(field[..., ch], sigma) for ch in range(2)])
+        energies = _orientation_energies(field[..., 0][mask_rs], field[..., 1][mask_rs])
+        cell = _ring_sector_cells(mask_rs)
+        counts = np.maximum(np.bincount(cell, minlength=16), 1).astype(np.float64)
+        desc = np.array([np.bincount(cell, weights=e, minlength=16) for e in energies]) / counts[None, :]
+    else:
+        field = field.copy()
+        field[np.asarray(mask) == 0] = 0  # the exterior
+        field = sktform.resize(field, tuple(siftshape) + (2,), preserve_range=True)
+        if sigma:
+            field = np.dstack([ndimage.gaussian_filter(field[..., ch], sigma) for ch in range(2)])
+        desc = _grid_pool(_orientation_energies(field[..., 0], field[..., 1]), siftshape[0])
+    return _lowe_normalise(desc.ravel())
+
+
+def _signed_scalar_descriptor(field, mask, use_mask=True, resize='cap', siftshape=(64,64), sigma=1.):
+    """ sign-aware descriptor of a signed scalar field (curl, divergence): the mean positive part and the mean negative
+    part in each of the 16 spatial cells (4 x 4 grid unmasked, ring x sector cells masked, as _vector_sift_descriptor),
+    channel-major (index = channel * 16 + cell, channel 0 = positive, 1 = negative), L2 normalised. 32-d. """
+    import skimage.transform as sktform
+    field = np.asarray(field, dtype=np.float64)
+    if use_mask:
+        field, mask_rs = _masked_resize(field, mask, resize, siftshape)
+        if mask_rs.sum() == 0:
+            return np.zeros(2 * 16)
+        if sigma:
+            field = ndimage.gaussian_filter(field, sigma)
+        v = field[mask_rs]
+        cell = _ring_sector_cells(mask_rs)
+        counts = np.maximum(np.bincount(cell, minlength=16), 1).astype(np.float64)
+        desc = np.array([np.bincount(cell, weights=np.maximum(v, 0), minlength=16),
+                         np.bincount(cell, weights=np.maximum(-v, 0), minlength=16)]) / counts[None, :]
+    else:
+        field = field.copy()
+        field[np.asarray(mask) == 0] = 0  # the exterior
+        field = sktform.resize(field, tuple(siftshape), preserve_range=True)
+        if sigma:
+            field = ndimage.gaussian_filter(field, sigma)
+        desc = _grid_pool(np.array([np.maximum(field, 0), np.maximum(-field, 0)]), siftshape[0])
+    desc = desc.ravel()
+    n = np.linalg.norm(desc)
+    return desc / n if n > 1e-12 else np.zeros_like(desc)
+
+
+def _directional_motion_descriptors(flow_cnt, curl_cnt, div_cnt, cnt_binary, use_mask, pixel_res, time_res,
+                                    siftshape, masked_sift_resize, sigma, shear):
+    """ the directional_motion_sift=True replacement of the motion SIFT blocks: [(descriptor, label format)] for the flow
+    (vector SIFT), curl and divergence (signed) and, if shear, the principal shear axis (vector SIFT of the doubled-angle
+    axis field). flow_cnt: the cropped flow (nearest-neighbour filled outside the mask if use_mask). """
+    kw = dict(use_mask=use_mask, resize=masked_sift_resize, siftshape=siftshape, sigma=sigma)
+    out = [(_vector_sift_descriptor(flow_cnt * pixel_res / float(time_res), cnt_binary, **kw), 'flow_vector_sift_%s'),
+           (_signed_scalar_descriptor(curl_cnt, cnt_binary, **kw), 'curl_signed_%s'),
+           (_signed_scalar_descriptor(div_cnt, cnt_binary, **kw), 'div_signed_%s')]
+    if shear:
+        out.append((_vector_sift_descriptor(_shear_axis_field(flow_cnt) / float(time_res), cnt_binary, **kw),
+                    'shear_axis_sift_%s'))
+    return out
+
+
 def _masked_haralick(im, mask, distance):
     """ Compute the 13 Haralick features from a gray-level co-occurrence matrix built only from pixel pairs where both pixels lie within the binary mask.
 
@@ -2172,7 +2309,9 @@ def compute_boundary_motion_features(vid_flow,
                                      masks=None,
                                      fast=True,
                                      n_jobs=1,
-                                     shear_features=True):
+                                     shear_features=True,
+                                     directional_motion_sift=False,
+                                     directional_sift_sigma=1.):
     """ Compute the Motion features for given tracked organoid contour boundaries. Can only computed for a video as opposed to shape and appearance. 
 
     Parameters
@@ -2224,6 +2363,18 @@ def compute_boundary_motion_features(vid_flow,
         flow (_shear_vector_flow; complements curl = rotation and divergence = dilation), as 'mean/stddev_shear_global_flow'
         after the divergence statistics and as 'shear_sift_*' descriptors after 'div_sift_*' (masked / unmasked as the
         curl and divergence SIFT). False gives the features without them.
+    directional_motion_sift : bool
+        if False (default), the motion SIFT descriptors run gradient-based SIFT on the flow magnitude, curl, divergence and
+        shear-rate images ('sift_motion_*', 'curl_sift_*', 'div_sift_*', 'shear_sift_*'), which loses the flow direction
+        and the sign / value of curl and divergence in locally uniform regions. If True, they are replaced (same
+        position) by: 'flow_vector_sift_*' (128-d: the flow vectors used directly as SIFT's gradient field, so the
+        orientation is the flow direction), 'curl_signed_*' and 'div_signed_*' (32-d: the mean positive and negative
+        part in each of the 16 spatial cells) and, with shear_features, 'shear_axis_sift_*' (128-d: the vector SIFT of the
+        principal stretching axis of the deviatoric strain rate, angle doubled as it is an axis). Masked / unmasked as
+        the other SIFT descriptors.
+    directional_sift_sigma : float
+        directional_motion_sift only: Gaussian smoothing sigma of the fields before the descriptors (noise of the flow
+        and its derivatives)
     Returns
     -------
     out_array : (n_organoids, n_frames, n_features) array
@@ -2235,7 +2386,7 @@ def compute_boundary_motion_features(vid_flow,
 
     """
     if fast:
-        return compute_boundary_motion_features_fast(vid_flow, boundaries, compute_all_feats=compute_all_feats, compute_global_feats=compute_global_feats, compute_contour_feats=compute_contour_feats, n_contour_feat_bins=n_contour_feat_bins, cnt_sigma=cnt_sigma, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start, pixel_res=pixel_res, time_res=time_res, compute_sift_feats=compute_sift_feats, siftshape=siftshape, timesample=timesample, use_mask=use_mask, masked_sift_resize=masked_sift_resize, masks=masks, n_jobs=n_jobs, shear_features=shear_features)
+        return compute_boundary_motion_features_fast(vid_flow, boundaries, compute_all_feats=compute_all_feats, compute_global_feats=compute_global_feats, compute_contour_feats=compute_contour_feats, n_contour_feat_bins=n_contour_feat_bins, cnt_sigma=cnt_sigma, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start, pixel_res=pixel_res, time_res=time_res, compute_sift_feats=compute_sift_feats, siftshape=siftshape, timesample=timesample, use_mask=use_mask, masked_sift_resize=masked_sift_resize, masks=masks, n_jobs=n_jobs, shear_features=shear_features, directional_motion_sift=directional_motion_sift, directional_sift_sigma=directional_sift_sigma)
 
     # boundaries should be at least (n_orgs, timepoints, discretisation, 2)
     # vid_flow is (timepoints-1,  nrows, ncols, 2) (in x,y) format.
@@ -2451,7 +2602,16 @@ def compute_boundary_motion_features(vid_flow,
                                 all_feats_norm_bool.append(np.hstack([False]*2))
 
 
-                        if compute_all_feats==True or (compute_all_feats==False and compute_sift_feats==True):
+                        if (compute_all_feats==True or (compute_all_feats==False and compute_sift_feats==True)) and directional_motion_sift:
+                            for sift_texture, sift_label in _directional_motion_descriptors(
+                                    flow_vid_cnt_fill if use_mask else flow_vid_cnt, curl_vid_cnt, div_vid_cnt, cnt_binary,
+                                    use_mask, pixel_res, time_res, siftshape, masked_sift_resize, directional_sift_sigma,
+                                    shear_features):
+                                all_feats.append(sift_texture)
+                                all_feats_labels.append(np.hstack([sift_label%(str(iii+1)) for iii in np.arange(len(sift_texture))]))
+                                all_feats_norm_bool.append(np.hstack([True]*len(sift_texture)))
+
+                        elif compute_all_feats==True or (compute_all_feats==False and compute_sift_feats==True):
 
                             flow_vid_cnt_ = flow_vid_cnt * pixel_res / float(time_res)
                             flow_vid_cnt_ = np.linalg.norm(flow_vid_cnt_, axis=-1) # create the magnitude of the flow.
@@ -3387,6 +3547,8 @@ def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_f
             shear_vid_cnt = _shear_vector_flow(flow_vid_cnt_fill) / float(time_res)
 
     if sift_inputs is not None:
+        if opts.get('directional_motion_sift', False):
+            return None  # the directional descriptors are computed on the CPU
         # only collect the resized images for the unmasked SIFT descriptors
         flow_vid_cnt_ = np.linalg.norm(flow_vid_cnt * pixel_res / float(time_res), axis=-1)
         for sift_im in (flow_vid_cnt_, curl_vid_cnt, div_vid_cnt) + ((shear_vid_cnt,) if shear else ()):
@@ -3490,7 +3652,14 @@ def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_f
                                                'stddev_speed_flow_region%d' %(reg)]))
             all_feats_norm_bool.append(np.hstack([False]*2))
 
-    if compute_all_feats==True or (compute_all_feats==False and opts['compute_sift_feats']==True):
+    if (compute_all_feats==True or (compute_all_feats==False and opts['compute_sift_feats']==True)) and opts.get('directional_motion_sift', False):
+        for sift_texture, sift_label in _directional_motion_descriptors(
+                flow_vid_cnt_fill if use_mask else flow_vid_cnt, curl_vid_cnt, div_vid_cnt, cnt_binary, use_mask,
+                pixel_res, time_res, siftshape, opts['masked_sift_resize'], opts.get('directional_sift_sigma', 1.), shear):
+            all_feats.append(sift_texture)
+            all_feats_labels.append(np.hstack([sift_label%(str(iii+1)) for iii in np.arange(len(sift_texture))]))
+            all_feats_norm_bool.append(np.hstack([True]*len(sift_texture)))
+    elif compute_all_feats==True or (compute_all_feats==False and opts['compute_sift_feats']==True):
         flow_vid_cnt_ = flow_vid_cnt * pixel_res / float(time_res)
         flow_vid_cnt_ = np.linalg.norm(flow_vid_cnt_, axis=-1)
 
@@ -3559,7 +3728,9 @@ def compute_boundary_motion_features_fast(vid_flow,
                                           masked_sift_resize='cap',
                                           masks=None,
                                           n_jobs=1,
-                                          shear_features=True):
+                                          shear_features=True,
+                                          directional_motion_sift=False,
+                                          directional_sift_sigma=1.):
     """ Fast variant of compute_boundary_motion_features with the same parameters and outputs.
 
     Curl and divergence are computed once per frame instead of once per object and frame, the regional speed windows are built in the bounding box of the object instead of the full frame and the SIFT extractor is created once. Objects can be processed in parallel.
@@ -3592,7 +3763,8 @@ def compute_boundary_motion_features_fast(vid_flow,
                 compute_contour_feats=compute_contour_feats, n_contour_feat_bins=n_contour_feat_bins,
                 cnt_sigma=cnt_sigma, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start,
                 pixel_res=pixel_res, time_res=time_res, compute_sift_feats=compute_sift_feats, siftshape=siftshape,
-                use_mask=use_mask, masked_sift_resize=masked_sift_resize, shear_features=shear_features)
+                use_mask=use_mask, masked_sift_resize=masked_sift_resize, shear_features=shear_features,
+                directional_motion_sift=directional_motion_sift, directional_sift_sigma=directional_sift_sigma)
     per_obj = _run_fast_feature_chunks(_motion_features_chunk_fast, len(boundaries), n_jobs,
                                        (vid_flow, boundaries, masks, frames, opts))
     return _assemble_fast_features(per_obj, len(boundaries), len(frames))

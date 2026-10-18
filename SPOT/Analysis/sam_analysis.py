@@ -1070,7 +1070,7 @@ def get_SAM_feature_type(feature_names):
             feature_scope[name_ii] = 1
         if name in haralick_names: # i guess this is distributional. 
             feature_scope[name_ii] = 2
-        if 'sift_' in name:
+        if 'sift_' in name or '_signed_' in name:
             feature_scope[name_ii] = 2
         if 'hist' in name:
             feature_scope[name_ii] = 2
