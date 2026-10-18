@@ -1874,7 +1874,8 @@ def find_representative_images_per_cluster_PCA(all_feats,
 
     # define the final size. 
     patch_m, patch_n = np.int32(np.max(all_object_patches_sizes, axis=0) * mosaic_size)
-    
+    sample_patches_realsize = [] # the real-size patches (and their background) selected per cluster, montaged once the cell size is known
+
     for lab_ii, lab in enumerate(unique_cluster_labels): 
         
         select = all_cluster_labels == lab
@@ -1973,10 +1974,21 @@ def find_representative_images_per_cluster_PCA(all_feats,
             
             all_patches_clust.append(img_panel_r_ind)
             all_patches_sizes.append(img_panel_r_ind.shape)
-        
-        # img_panel = np.percentile(mean_I,75)*np.ones((n_rows*patch_m, 
+
+        sample_patches_realsize.append((all_patches_clust, mean_I))
+
+    # enlarge the mosaic cell if any selected real-size patch is bigger than it, so every patch fits (and all clusters share one cell size).
+    for all_patches_clust, _ in sample_patches_realsize:
+        for patch in all_patches_clust:
+            patch_m = max(patch_m, patch.shape[0])
+            patch_n = max(patch_n, patch.shape[1])
+
+    for lab, (all_patches_clust, mean_I) in zip(unique_cluster_labels, sample_patches_realsize):
+        img_panel_r_ind = all_patches_clust[-1]
+
+        # img_panel = np.percentile(mean_I,75)*np.ones((n_rows*patch_m,
         #                       n_cols*patch_n)) #* np.mean(mean_I)
-        
+
         if len(img_panel_r_ind.shape) == 2:
             img_panel = np.min(mean_I)*np.ones((n_rows_mosaic*patch_m, 
                                                 n_cols_mosaic*patch_n)) #* np.mean(mean_I)
