@@ -14,8 +14,12 @@ from conftest import run_quiet
 EXPECTED_GROUPS = {
     'shape': ['curvature', 'contour geometry', 'binary morphology', 'Fourier', 'elliptic Fourier', 'Euler characteristic transform', 'shape context'],
     'appearance': ['global intensity', 'regional intensity', 'Haralick texture', 'SIFT'],
-    'motion': ['global motion', 'regional speed', 'regional speed distribution', 'speed SIFT', 'curl SIFT', 'divergence SIFT', 'shear SIFT'],
+    'motion': ['global motion', 'regional speed', 'regional speed distribution', 'flow vector SIFT', 'curl signed',
+               'divergence signed', 'shear axis SIFT'],
 }
+# the motion families of the gradient SIFT descriptors (directional_motion_sift=False, earlier exports)
+GRADIENT_MOTION_GROUPS = ['global motion', 'regional speed', 'regional speed distribution', 'speed SIFT', 'curl SIFT',
+                          'divergence SIFT', 'shear SIFT']
 
 
 @pytest.fixture(scope='module')
@@ -97,7 +101,7 @@ def test_legacy_export_names_with_feature_sets():
     groups_of = lambda s: set(groups[sets == s])
     assert groups_of('shape') == set(EXPECTED_GROUPS['shape']) - {'elliptic Fourier'}  # exported before the EFD features
     assert groups_of('appearance') == set(EXPECTED_GROUPS['appearance']) | {'thresh_adj_stat'}  # legacy feature group
-    assert groups_of('motion') == set(EXPECTED_GROUPS['motion']) - {'shear SIFT'}  # exported before the shear features
+    assert groups_of('motion') == set(GRADIENT_MOTION_GROUPS) - {'shear SIFT'}  # exported before the shear features
     W = pp.weight_sam_features(np.random.default_rng(0).standard_normal((50, len(names))), names, feature_sets=given)
     for s in ('shape', 'appearance', 'motion'):
         np.testing.assert_allclose(W[:, sets == s].var(0).sum(), 1.)

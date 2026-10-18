@@ -794,7 +794,7 @@ def compute_boundary_motion_features_torch(vid_flow,
                                            masks=None,
                                            device=None,
                                            shear_features=True,
-                                           directional_motion_sift=False,
+                                           directional_motion_sift=True,
                                            directional_sift_sigma=1.):
     """ PyTorch variant of SPOT.Features.features.compute_boundary_motion_features with the same parameters and outputs.
 

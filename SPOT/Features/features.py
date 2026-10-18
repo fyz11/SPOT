@@ -2310,7 +2310,7 @@ def compute_boundary_motion_features(vid_flow,
                                      fast=True,
                                      n_jobs=1,
                                      shear_features=True,
-                                     directional_motion_sift=False,
+                                     directional_motion_sift=True,
                                      directional_sift_sigma=1.):
     """ Compute the Motion features for given tracked organoid contour boundaries. Can only computed for a video as opposed to shape and appearance. 
 
@@ -2364,10 +2364,10 @@ def compute_boundary_motion_features(vid_flow,
         after the divergence statistics and as 'shear_sift_*' descriptors after 'div_sift_*' (masked / unmasked as the
         curl and divergence SIFT). False gives the features without them.
     directional_motion_sift : bool
-        if False (default), the motion SIFT descriptors run gradient-based SIFT on the flow magnitude, curl, divergence and
-        shear-rate images ('sift_motion_*', 'curl_sift_*', 'div_sift_*', 'shear_sift_*'), which loses the flow direction
-        and the sign / value of curl and divergence in locally uniform regions. If True, they are replaced (same
-        position) by: 'flow_vector_sift_*' (128-d: the flow vectors used directly as SIFT's gradient field, so the
+        if True (default), the motion SIFT descriptors are directional / sign aware. If False (the original SAM
+        features), they run gradient-based SIFT on the flow magnitude, curl, divergence and shear-rate images
+        ('sift_motion_*', 'curl_sift_*', 'div_sift_*', 'shear_sift_*'), which loses the flow direction and the sign /
+        value of curl and divergence in locally uniform regions. If True, these are replaced (same position) by: 'flow_vector_sift_*' (128-d: the flow vectors used directly as SIFT's gradient field, so the
         orientation is the flow direction), 'curl_signed_*' and 'div_signed_*' (32-d: the mean positive and negative
         part in each of the 16 spatial cells) and, with shear_features, 'shear_axis_sift_*' (128-d: the vector SIFT of the
         principal stretching axis of the deviatoric strain rate, angle doubled as it is an axis). Masked / unmasked as
@@ -3729,7 +3729,7 @@ def compute_boundary_motion_features_fast(vid_flow,
                                           masks=None,
                                           n_jobs=1,
                                           shear_features=True,
-                                          directional_motion_sift=False,
+                                          directional_motion_sift=True,
                                           directional_sift_sigma=1.):
     """ Fast variant of compute_boundary_motion_features with the same parameters and outputs.
 

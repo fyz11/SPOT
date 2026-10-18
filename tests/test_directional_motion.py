@@ -106,17 +106,17 @@ def u373():
 def test_implementations_agree_and_layout(u373, use_mask):
     kw = dict(vid_flow=u373['flow'], boundaries=u373['boundaries'], use_mask=use_mask,
               masks=u373['masks'] if use_mask else None)
-    o = run_quiet(sf.compute_boundary_motion_features, fast=False, directional_motion_sift=True, **kw)
-    f = run_quiet(sf.compute_boundary_motion_features, directional_motion_sift=True, **kw)
+    o = run_quiet(sf.compute_boundary_motion_features, fast=False, **kw)  # directional_motion_sift=True by default
+    f = run_quiet(sf.compute_boundary_motion_features, **kw)
     assert list(o[1]) == list(f[1])
     np.testing.assert_allclose(f[0], o[0], atol=1e-10, equal_nan=True)
     pytest.importorskip('torch')
     from SPOT.Features import features_torch as ft
-    t = run_quiet(ft.compute_boundary_motion_features_torch, directional_motion_sift=True, **kw)
+    t = run_quiet(ft.compute_boundary_motion_features_torch, **kw)
     assert list(o[1]) == list(t[1])
     np.testing.assert_allclose(t[0], o[0], atol=1e-8, equal_nan=True)
     # the directional blocks replace the gradient SIFT blocks at the same position
-    g = run_quiet(sf.compute_boundary_motion_features, **kw)
+    g = run_quiet(sf.compute_boundary_motion_features, directional_motion_sift=False, **kw)
     lab_d, lab_g = list(o[1]), list(g[1])
     first = lab_g.index('sift_motion_1')
     assert lab_d[:first] == lab_g[:first]

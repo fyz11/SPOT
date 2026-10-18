@@ -24,7 +24,8 @@ def test_labels_and_values_match_pip_011(u373):
     assert list(labels) == list(PIP['shape_labels'])
     np.testing.assert_allclose(feats[..., np.char.startswith(labels, 'EFD_')], PIP['efd'], atol=1e-12, equal_nan=True)
 
-    feats, labels, _ = run_quiet(sf.compute_boundary_motion_features, vid_flow=u373['flow'], boundaries=u373['boundaries'], use_mask=False)
+    feats, labels, _ = run_quiet(sf.compute_boundary_motion_features, vid_flow=u373['flow'], boundaries=u373['boundaries'], use_mask=False,
+                                 directional_motion_sift=False)  # the motion SIFT of pip 0.1.1
     labels = np.asarray(labels).astype(str)
     assert list(labels) == list(PIP['motion_labels'])
     sh = np.isin(labels, ['mean_shear_global_flow', 'stddev_shear_global_flow'])

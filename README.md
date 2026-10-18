@@ -50,6 +50,7 @@ Then open the demo notebook [`examples/SPOT_demo_new_features.ipynb`](examples/S
 **Oct 2026: version 2.0**
 - **Faster:** an optimised implementation is now the default (`fast=True`, parallel with `n_jobs`), plus `*_torch` GPU variants, all with the same outputs. [More](#faster-extraction)
 - **Masked appearance and motion** by default (`use_mask=True`): they describe only the object interior and no longer leak shape. [More](#masked-appearance-and-motion-features)
+- **Directional motion descriptors** by default (`directional_motion_sift=True`): the flow direction and the sign of curl / divergence are kept, and shear gets its principal axis. [More](#computing-the-phenome)
 - **New features:** elliptic Fourier descriptors (shape) and the shear rate of the flow (motion), as in the PyPI 0.1.1 build. [More](#computing-the-phenome)
 - **Analysis helpers:** equal weighting of SAM sets and feature families (recommended), confound regression (batch by default), rotation-invariant features. [More](#analysing-the-sam-phenome)
 - **SAM modules:** a new multi-scale selection of the number of modules (the old rule picked the worst partition). [More](#sam-module-selection)
@@ -78,7 +79,7 @@ Dynamic objects constantly change their behaviour. We hypothesise that three mea
 |---|---|
 | **Shape** | curvature, contour geometry, binary morphology (area, eccentricity, Hu / Zernike moments, ...), Fourier (`Fourier_`), elliptic Fourier descriptors (`EFD_`), Euler characteristic transform (`ECT_`), shape context |
 | **Appearance** | global and regional intensity, Haralick texture, SIFT (`sift_appear_`) |
-| **Motion** | global motion (speed, curl, divergence, shear rate), regional speed and its distribution, SIFT of the speed, curl, divergence and shear-rate fields (`sift_motion_`, `curl_sift_`, `div_sift_`, `shear_sift_`) |
+| **Motion** | global motion (speed, curl, divergence, shear rate), regional speed and its distribution, directional SIFT of the flow (`flow_vector_sift_`) and of the principal shear axis (`shear_axis_sift_`), sign-aware curl and divergence (`curl_signed_`, `div_signed_`); with `directional_motion_sift=False`, gradient SIFT of the speed, curl, divergence and shear-rate fields (`sift_motion_`, `curl_sift_`, `div_sift_`, `shear_sift_`) |
 
 `SPOT.Analysis.preprocessing.sam_feature_groups(feature_names)` returns the set and family of every feature.
 
@@ -110,9 +111,9 @@ flow = SPOT_optical_flow.extract_vid_optflow(vid_norm, flow_params=optical_flow_
 motion, motion_names, _ = SPOT_SAM_features.compute_boundary_motion_features(flow, boundaries, masks=masks,
                                                                              pixel_res=pixel_res, time_res=time_res, n_jobs=-1)
 ```
-The elliptic Fourier descriptors (`elliptic_fourier_features=True`, `elliptic_fourier_order=10`) and the shear-rate features (`shear_features=True`) are on by default, with the same names and order as the PyPI 0.1.1 build; set them to `False` for the features without them.
+The elliptic Fourier descriptors (`elliptic_fourier_features=True`, `elliptic_fourier_order=10`) and the shear-rate features (`shear_features=True`) are on by default, with the same names and order as the PyPI 0.1.1 build (with `directional_motion_sift=False` for its motion SIFT); set them to `False` for the features without them.
 
-**Directional motion descriptors** (`directional_motion_sift=True`, off by default). The default motion SIFT descriptors run gradient-based SIFT on the flow *magnitude*, curl, divergence and shear-rate images, so they lose the flow direction and the sign of curl and divergence. With the flag, these blocks are replaced in the same position by:
+**Directional motion descriptors** (`directional_motion_sift=True`, default). The original motion SIFT descriptors run gradient-based SIFT on the flow *magnitude*, curl, divergence and shear-rate images, so they lose the flow direction and the sign of curl and divergence. By default these blocks are replaced, in the same position, by:
 
 | block | descriptor | name |
 |---|---|---|
@@ -120,7 +121,9 @@ The elliptic Fourier descriptors (`elliptic_fourier_features=True`, `elliptic_fo
 | curl, divergence | sign aware: the mean positive and negative part in each of the 16 spatial cells (32-d) | `curl_signed_*`, `div_signed_*` |
 | shear | SIFT of the principal stretching axis of the strain rate, angle doubled as it is an axis (128-d) | `shear_axis_sift_*` |
 
-They are masked / unmasked as the other SIFT descriptors; `directional_sift_sigma=1.` smooths the fields first.
+They are masked / unmasked as the other SIFT descriptors; `directional_sift_sigma=1.` smooths the fields first; `directional_motion_sift=False` gives the original gradient SIFT descriptors.
+
+On the cell tracking challenge data (PhC-C2DH-U373, Fluo-N2DL-HeLa), motion features alone predict the migration direction far better with them (mean cosine 0.74 vs 0.44 and 0.96 vs 0.09), and they separate mitotic HeLa cells better. Combined with rotation averaging and equal weighting, they give the cleanest SAM graphs (U373: 1.4 vs 3.6 loops) and the best mitosis separation (HeLa mitotic node AUC 0.92 vs 0.91). Rotation averaging removes the absolute direction, which otherwise adds variation that is not phenotype (U373 without it: 5.8 vs 4.2 loops).
 
 <!-- TOC --><a name="masked-appearance-and-motion-features"></a>
 ### Masked appearance and motion features

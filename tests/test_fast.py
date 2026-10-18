@@ -98,15 +98,17 @@ def test_defaults_are_fast_and_masked(case_data):
     assert np.array_equal(np.asarray(a, np.float64), np.asarray(b, np.float64), equal_nan=True)
 
 
-def test_unmasked_motion_sift_ignores_background_flow():
-    """ unmasked motion SIFT: the flow outside the object is set to 0, so the speed SIFT does not change when only the
-    background flow changes """
+@pytest.mark.parametrize('directional,prefix', [(False, 'sift_motion'), (True, 'flow_vector_sift')])
+def test_unmasked_motion_sift_ignores_background_flow(directional, prefix):
+    """ unmasked motion SIFT: the flow outside the object is set to 0, so the speed / flow SIFT does not change when only
+    the background flow changes """
     d = fixtures.load('synthetic')
     flow2 = d['flow'].copy()
     outside = ~d['masks'][:-1]
     flow2[outside] = np.random.default_rng(0).normal(size=(outside.sum(), 2)) * 5
-    kw = dict(boundaries=d['boundaries'], use_mask=False)
+    kw = dict(boundaries=d['boundaries'], use_mask=False, directional_motion_sift=directional)
     a, names, _ = run_quiet(sf.compute_boundary_motion_features, vid_flow=d['flow'], **kw)
     b, _, _ = run_quiet(sf.compute_boundary_motion_features, vid_flow=flow2, **kw)
-    cols = np.char.startswith(np.asarray(names).astype(str), 'sift_motion')
+    cols = np.char.startswith(np.asarray(names).astype(str), prefix)
+    assert cols.sum() == 128
     assert np.nanmax(np.abs(np.asarray(a)[..., cols] - np.asarray(b)[..., cols])) < 1e-12
