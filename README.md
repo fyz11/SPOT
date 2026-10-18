@@ -48,6 +48,8 @@ Then open the demo notebook [`examples/SPOT_demo_new_features.ipynb`](https://gi
 
 <!-- TOC --><a name="whats-new"></a>
 ## What's new
+**Oct 2026: graphical interface.** Run the whole SPOT workflow, from a folder of organoid videos (or a Cell Tracking Challenge dataset) to the analysis figures, without writing code. [More](#graphical-interface)
+
 **Oct 2026: version 2.0** (full list and compatibility notes: [CHANGELOG.md](https://github.com/fyz11/SPOT/blob/main/CHANGELOG.md))
 - **Faster:** an optimised implementation is now the default (`fast=True`, parallel with `n_jobs`), plus `*_torch` GPU variants, all with the same outputs. [More](#faster-extraction)
 - **Masked appearance and motion** by default (`use_mask=True`): they describe only the object interior and no longer leak shape. [More](#masked-appearance-and-motion-features)
@@ -226,15 +228,39 @@ The PyTorch loaders (`load_and_run_YOLOv3_weights_torch_detection_model_RGB`, `l
 
 <!-- TOC --><a name="graphical-interface"></a>
 ## Graphical interface
-The point-and-click SAM-SPOT GUI ([`gui/`](https://github.com/fyz11/SPOT/tree/main/gui)) runs the whole workflow without writing code: from a folder of organoid videos (detection, tracking, segmentation, SAM phenome, compilation) to the analysis figures (SAM modules, phenotype map, clusters, trajectories, transitions). It also analyses annotated [Cell Tracking Challenge](http://celltrackingchallenge.net) datasets, or your own tracking results in the same format. Every run is recorded for reproducibility and can be repeated from the command line.
+The point-and-click SAM-SPOT GUI ([`gui/`](https://github.com/fyz11/SPOT/tree/main/gui)) runs the whole workflow without writing code, from a folder of videos to the analysis figures.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/fyz11/SPOT/main/gui/tutorial/images/org_standard_tab5.png" width=85%/>
+</p>
+
+The GUI is part of this repository, not of the PyPI package. Install SPOT ([To install](#to-install)), clone the repository and start it:
 ```shell
+git clone https://github.com/fyz11/SPOT.git
+cd SPOT
 python gui/spot_gui.py
 ```
+On Windows you can also double-click `gui/launch_spot_gui.bat`. Its five tabs follow the workflow:
+
+| tab | what you do |
+|---|---|
+| **1. Set up** | choose organoid videos or a Cell Tracking Challenge dataset, the results folder, pixel size and time between frames |
+| **2. Sample info** | give each video its condition (and optionally genotype, patient / batch, marker) |
+| **3. Run pipeline** | run Stage 1 (prepare, detect, track, segment, clean up), Stage 2 (SAM phenome, marker, compile) and the analysis; follow the progress per video |
+| **4. Check segmentation** | step through each video with the outlines drawn on top |
+| **5. Analysis & results** | set the comparison and the map / cluster options, run the analysis and browse its figures and tables |
+
+- **Organoid videos:** the pretrained networks detect, track and outline the organoids; optional paired fluorescent marker videos are measured inside them.
+- **[Cell Tracking Challenge](http://celltrackingchallenge.net) datasets** (e.g. PhC-C2DH-U373): the cells are outlined and tracked from the annotations, or from your own segmentation and tracking saved in the challenge format.
+- **Reproducible:** every setting is saved with the results, every run is recorded (settings, sample table, software and network versions, log) and can be reloaded or repeated from the command line, e.g. on a server:
+  `python gui/spot_pipeline.py --config <results folder>/spot_project.json --steps prepare,detect,track,segment,postprocess,features,markers,compile,analysis`
+- **Themes:** Standard, Pink Panther and Forest Green.
+
 Step-by-step tutorial with screenshots: [SAM-SPOT_GUI_tutorial.pdf](https://github.com/fyz11/SPOT/blob/main/gui/SAM-SPOT_GUI_tutorial.pdf); details in the [GUI README](https://github.com/fyz11/SPOT/blob/main/gui/README.md).
 
 <!-- TOC --><a name="example-scripts"></a>
 ## Example scripts
-Start with the demo [`examples/SPOT_demo_new_features.ipynb`](https://github.com/fyz11/SPOT/blob/main/examples/SPOT_demo_new_features.ipynb) (or `examples/SPOT_demo_new_features.py`). Scripts for every step of the workflow, on the example data in `data/`, are in `examples/`; a detailed guide is the [Getting Started word document](https://github.com/fyz11/SPOT/blob/main/Getting%20Started%20with%20SPOT.docx).
+Start with the demo [`examples/SPOT_demo_new_features.ipynb`](https://github.com/fyz11/SPOT/blob/main/examples/SPOT_demo_new_features.ipynb) (or `examples/SPOT_demo_new_features.py`). Scripts for every step of the workflow, on the example data in `data/`, are in `examples/`; a detailed guide is the [Getting Started word document](https://github.com/fyz11/SPOT/blob/main/Getting%20Started%20with%20SPOT.docx). The [graphical interface](#graphical-interface) runs the same stages without code.
 
 | stage | scripts (`examples/`) |
 |---|---|
