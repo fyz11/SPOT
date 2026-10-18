@@ -19,7 +19,7 @@ description="Shape, appearance, motion Phenotype Observation Tool for streamline
 authors = [{name='Felix Y. Zhou', email='felixzhou1@gmail.com'}]
 readme = "README.md"
 license={text = "LICR Software License"}
-version = "0.1.1"
+version = "2.0.0"
 classifiers = [
     "Intended Audience :: Developers",
     "Operating System :: POSIX :: Linux",
