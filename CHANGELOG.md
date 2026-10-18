@@ -1,9 +1,9 @@
 # Changelog
 
-## Unreleased
+## 2.0.1 (Oct 2026)
 
 ### Added
-- **Graphical interface** (`gui/`): runs the full workflow (Stages 1-3) on a folder of organoid videos without code, with run records for reproducibility and a command-line mode. Also analyses Cell Tracking Challenge datasets (annotations or your own results in the challenge format). Themes: Standard, Pink Panther, Forest Green. Tutorial: `gui/SAM-SPOT_GUI_tutorial.pdf`.
+- **Graphical interface** (`gui/`): runs the full workflow (Stages 1-3) on a folder of organoid videos without code, with run records for reproducibility and a command-line mode. Also analyses Cell Tracking Challenge datasets (annotations or your own results in the challenge format). Themes: Standard, Pink Panther, Forest Green. Tutorial: `gui/SAM-SPOT_GUI_tutorial.pdf`. The GUI comes with the GitHub repository, not the PyPI package.
 
 ### Fixed
 - `find_representative_images_per_cluster_PCA`: no longer crashes when a selected patch is larger than the mosaic cell (the cell grows to fit); clusters with fewer objects than mosaic cells leave cells empty (index -1, nan coordinates, size 0); colour patches and single-object clusters are handled.
