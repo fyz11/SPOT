@@ -47,7 +47,7 @@ Then open the demo notebook [`examples/SPOT_demo_new_features.ipynb`](examples/S
 
 <!-- TOC --><a name="whats-new"></a>
 ## What's new
-**Oct 2026: version 2.0**
+**Oct 2026: version 2.0** (full list and compatibility notes: [CHANGELOG.md](CHANGELOG.md))
 - **Faster:** an optimised implementation is now the default (`fast=True`, parallel with `n_jobs`), plus `*_torch` GPU variants, all with the same outputs. [More](#faster-extraction)
 - **Masked appearance and motion** by default (`use_mask=True`): they describe only the object interior and no longer leak shape. [More](#masked-appearance-and-motion-features)
 - **Directional motion descriptors** by default (`directional_motion_sift=True`): the flow direction and the sign of curl / divergence are kept, and shear gets its principal axis. [More](#computing-the-phenome)
