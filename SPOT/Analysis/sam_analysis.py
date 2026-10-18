@@ -912,7 +912,10 @@ def compute_most_representative_image_patches( object_feature_module_expr,
     
     for lab_ii in np.arange(N_features_clusters): 
         # rand_index = np.argsort(samples_feature_module_expr[:,lab_ii])[::-1]
-        purity_index = object_feature_module_expr[:,lab_ii] - np.max(object_feature_module_expr[:,np.setdiff1d(np.arange(N_features_clusters), lab_ii)], axis=1)
+        if N_features_clusters > 1:
+            purity_index = object_feature_module_expr[:,lab_ii] - np.max(object_feature_module_expr[:,np.setdiff1d(np.arange(N_features_clusters), lab_ii)], axis=1)
+        else:
+            purity_index = object_feature_module_expr[:,lab_ii].copy() # a single module: rank by its own expression
         object_SAM_module_purity_scores.append(purity_index)
         
         select_index = np.argsort(purity_index)[::-1]
@@ -936,13 +939,16 @@ def compute_most_representative_image_patches( object_feature_module_expr,
         all_patches_sizes = np.vstack(all_patches_sizes)
         
         
-        patch_m, patch_n = np.max(all_patches_sizes, axis=0)
-        img_panel = np.percentile(mean_I,75)*np.ones((n_rows*patch_m, 
-                                                      n_cols*patch_n)) #* np.nanmean(mean_I)
-        
+        # the cell size is set by the rows and columns only, so colour (m, n, ch) patches work too.
+        patch_m, patch_n = np.max(all_patches_sizes[:, :2], axis=0)
+        img_panel = np.percentile(mean_I,75)*np.ones((n_rows*patch_m,
+                                                      n_cols*patch_n) + tuple(all_patches_sizes[0, 2:])) #* np.nanmean(mean_I)
+
         for ii in np.arange(n_rows):
             for jj in np.arange(n_cols):
                 kk = ii*n_cols + jj
+                if kk >= len(all_patches_clust):
+                    break # fewer objects than mosaic cells: leave the remaining cells as background
                 patch = all_patches_clust[kk]
                 # center this.
                 mm, nn = patch.shape[:2]
@@ -1881,20 +1887,23 @@ def find_representative_images_per_cluster_PCA(all_feats,
         select = all_cluster_labels == lab
         select_index = np.arange(len(all_cluster_labels))[select]
         
-        pca_cluster = PCA(n_components=1, 
-                          random_state=pca_random_state, 
-                          whiten=True)
-        pca_score_clusters = pca_cluster.fit_transform(all_feats[select])
-        
+        if len(select_index) > 1:
+            pca_cluster = PCA(n_components=1,
+                              random_state=pca_random_state,
+                              whiten=True)
+            pca_score_clusters = pca_cluster.fit_transform(all_feats[select])
+        else:
+            pca_score_clusters = np.zeros(len(select_index)) # PCA needs at least 2 objects
+
         # np.random.shuffle(rand_index)
-        pca_score_clusters = pca_score_clusters.ravel()
-        
+        pca_score_clusters = np.nan_to_num(pca_score_clusters.ravel()) # zero variance clusters give nan scores
+
         if rev_sign:
             pca_score_clusters = pca_score_clusters * -1
-        
+
         # valid = pca_score_clusters<=np.percentile(pca_score_clusters,95)
         valid = pca_score_clusters <= np.percentile(pca_score_clusters, percentile_cutoff*100)
-        
+
         # regate
         select_index = select_index[valid]
         pca_score_clusters = pca_score_clusters[valid]
@@ -1902,9 +1911,12 @@ def find_representative_images_per_cluster_PCA(all_feats,
         select_index_ = select_index[np.argsort(pca_score_clusters)[::-1]] # was abs? we shud check! 
         # rand_index_ = (rand_index[valid])[np.argsort(pca_score_clusters[valid])[::-1]]
         select_index = select_index_[:N_total]
-        
-        sample_images_indices.append(select_index)
-        sample_images_embedding_coords.append(all_embedding_coords[select_index])
+        n_select = len(select_index) # can be fewer than N_total for small clusters: the remaining mosaic cells stay empty
+
+        # pad to N_total entries (index -1, nan coordinates, size 0) so the outputs of all clusters stack into arrays
+        sample_images_indices.append(np.hstack([select_index, -np.ones(N_total-n_select, dtype=select_index.dtype)]))
+        sample_images_embedding_coords.append(np.concatenate([all_embedding_coords[select_index],
+                                                              np.full((N_total-n_select,)+all_embedding_coords.shape[1:], np.nan)]))
         
         """
         a. standard size. 
@@ -1926,12 +1938,14 @@ def find_representative_images_per_cluster_PCA(all_feats,
         else:
             print('error')
             
-        img_mosaic = np.zeros((n_rows_mosaic*M, 
-                                   n_cols_mosaic*N)) 
-            
+        img_mosaic = np.zeros((n_rows_mosaic*M,
+                                   n_cols_mosaic*N) + img_panel.shape[3:]) # keeps the channels of colour patches
+
         for ii in np.arange(n_rows_mosaic):
             for jj in np.arange(n_cols_mosaic):
                 kk = ii*n_cols_mosaic + jj
+                if kk >= n_select:
+                    break
                 patch = img_panel[kk].copy()
                 
                 img_mosaic[ii*M:ii*M+M, 
@@ -1949,7 +1963,9 @@ def find_representative_images_per_cluster_PCA(all_feats,
             
         
         sample_images.append(img_panel)
-        sample_images_patch_sizes.append(all_object_patches_sizes[select_index])
+        sample_images_patch_sizes.append(np.concatenate([all_object_patches_sizes[select_index],
+                                                         np.zeros((N_total-n_select,)+all_object_patches_sizes.shape[1:],
+                                                                  dtype=all_object_patches_sizes.dtype)]))
         
         
         """
@@ -2001,6 +2017,8 @@ def find_representative_images_per_cluster_PCA(all_feats,
         for ii in np.arange(n_rows_mosaic):
             for jj in np.arange(n_cols_mosaic):
                 kk = ii*n_cols_mosaic + jj
+                if kk >= len(all_patches_clust):
+                    break
                 patch = all_patches_clust[kk].copy()
                 # center this.
                 mm, nn = patch.shape[:2]
