@@ -425,6 +425,7 @@ SAM_FEATURE_GROUPS = [
     ('shape', 'curvature', lambda n: n.endswith('_curvature')),
     ('shape', 'contour geometry', lambda n: 'centroid_distance' in n or 'chordal' in n),
     ('shape', 'Fourier', lambda n: n.startswith('Fourier_')),
+    ('shape', 'elliptic Fourier', lambda n: n.startswith('EFD_')),
     ('shape', 'Euler characteristic transform', lambda n: n.startswith('ECT_')),
     ('shape', 'shape context', lambda n: n.startswith('Shape_Context_')),
     ('shape', 'binary morphology', lambda n: n in ('area', 'convex_area', 'perimeter', 'equivalent_diameter',
@@ -443,7 +444,7 @@ SAM_FEATURE_GROUPS = [
     ('motion', 'speed SIFT', lambda n: n.startswith('sift_motion_')),
     ('motion', 'curl SIFT', lambda n: n.startswith('curl_sift_')),
     ('motion', 'divergence SIFT', lambda n: n.startswith('div_sift_')),
-    ('motion', 'shear SIFT', lambda n: n.startswith('shear_sift_')),  # pip SAM-SPOT 0.1.1
+    ('motion', 'shear SIFT', lambda n: n.startswith('shear_sift_')),
 ]
 
 

@@ -111,9 +111,10 @@ def load(case):
 
 # feature function calls covered by the golden outputs: name -> (function name, input builder)
 def calls():
-    """(key, function name, kwargs builder) for every configuration covered by the goldens."""
+    """(key, function name, kwargs builder) for every configuration covered by the goldens. The goldens predate the
+    elliptic Fourier and shear features (tests/test_efd_shear.py), so these are switched off here."""
     c = [('morphology', 'compute_boundary_morphology_features',
-          lambda d: dict(boundaries=d['boundaries'], imshape=d['imshape']))]
+          lambda d: dict(boundaries=d['boundaries'], imshape=d['imshape'], elliptic_fourier_features=False))]
     c.append(('texture', 'compute_boundary_texture_features',
               lambda d: dict(vid=d['vid'], boundaries=d['boundaries'], use_mask=False)))
     for mode in ('cap', 'square', 'native'):
@@ -123,7 +124,9 @@ def calls():
     c.append(('texture_masked_contour_only', 'compute_boundary_texture_features',
               lambda d: dict(vid=d['vid'], boundaries=d['boundaries'], use_mask=True)))
     c.append(('motion', 'compute_boundary_motion_features',
-              lambda d: dict(vid_flow=d['flow'], boundaries=d['boundaries'], pixel_res=2., time_res=3., use_mask=False)))
+              lambda d: dict(vid_flow=d['flow'], boundaries=d['boundaries'], pixel_res=2., time_res=3., use_mask=False,
+                             shear_features=False)))
     c.append(('motion_masked', 'compute_boundary_motion_features',
-              lambda d: dict(vid_flow=d['flow'], boundaries=d['boundaries'], use_mask=True, masks=d['masks'])))
+              lambda d: dict(vid_flow=d['flow'], boundaries=d['boundaries'], use_mask=True, masks=d['masks'],
+                             shear_features=False)))
     return c

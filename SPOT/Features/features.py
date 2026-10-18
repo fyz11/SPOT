@@ -814,6 +814,81 @@ def compute_fft_boundary_feats(cont, pixel_xy_res=1., remove_closing_point=False
     return feats
 
 
+def compute_elliptic_fourier_feats(cont, order=10, pixel_xy_res=1.):
+    """ Normalised elliptic Fourier descriptors (EFD; Kuhl and Giardina, 1982) of closed 2D contours.
+
+    Unlike compute_fft_boundary_feats (the magnitude spectrum of the complex boundary signal, which discards phase), x(t)
+    and y(t) are expanded separately as real Fourier series in the cumulative arc length, keeping the coefficients
+    (a_n, b_n, c_n, d_n) of every harmonic (an ellipse in the plane). They are normalised for translation (DC term
+    dropped), rotation and start point (rotated into the frame of the 1st harmonic ellipse) and scale (divided by its
+    semi-major axis), so they are invariant to all four and keep shape asymmetry (e.g. chirality). As in the original
+    method, the start point normalisation has a 180 degree ambiguity (the 1st harmonic ellipse is symmetric), so moving
+    the start point of the contour can flip the sign of the coefficients of the even harmonics. Kuhl, F.P. and
+    Giardina, C.R. (1982) Elliptic Fourier features of a closed contour. Computer Graphics and Image Processing 18(3),
+    236-258. Same features as pip SAM-SPOT 0.1.1.
+
+    Parameters
+    ----------
+    cont : list of (n_pts, 2) arrays
+        the contours; the last point repeats the first (closed contour) and is dropped before fitting
+    order : int
+        number of harmonics. Output length per contour is 4*order - 3 (a_1, b_1, c_1 are fixed by the normalisation)
+    pixel_xy_res : float
+        pixel to physical units conversion (no effect on the normalised coefficients; for consistency)
+
+    Returns
+    -------
+    feats : (n_contours, 4*order-3) array
+        d_1, then (a_n, b_n, c_n, d_n) for n = 2 .. order
+    """
+    feats = []
+    for ccc in cont:
+        ccc = np.asarray(ccc[:-1], dtype=float) * pixel_xy_res
+        dxy = np.diff(np.vstack([ccc, ccc[:1]]), axis=0)  # wraps back to the start
+        dt = np.linalg.norm(dxy, axis=-1)
+        dt[dt == 0] = 1e-12  # duplicate points
+        t = np.hstack([0, np.cumsum(dt)])
+        T = t[-1]  # perimeter
+
+        a = np.zeros(order); b = np.zeros(order); c = np.zeros(order); d = np.zeros(order)
+        for n in range(1, order + 1):
+            const = T / (2. * (n ** 2) * (np.pi ** 2))
+            phi = 2 * n * np.pi * t / T
+            cos_term = np.cos(phi[1:]) - np.cos(phi[:-1])
+            sin_term = np.sin(phi[1:]) - np.sin(phi[:-1])
+            a[n - 1] = const * np.sum((dxy[:, 0] / dt) * cos_term)
+            b[n - 1] = const * np.sum((dxy[:, 0] / dt) * sin_term)
+            c[n - 1] = const * np.sum((dxy[:, 1] / dt) * cos_term)
+            d[n - 1] = const * np.sum((dxy[:, 1] / dt) * sin_term)
+
+        # rotation + start point: align to the major axis of the 1st harmonic ellipse
+        theta1 = 0.5 * np.arctan2(2 * (a[0] * b[0] + c[0] * d[0]), (a[0] ** 2 + c[0] ** 2 - b[0] ** 2 - d[0] ** 2))
+        cos_t = np.cos(np.arange(1, order + 1) * theta1)
+        sin_t = np.sin(np.arange(1, order + 1) * theta1)
+        a_star = a * cos_t + b * sin_t
+        b_star = -a * sin_t + b * cos_t
+        c_star = c * cos_t + d * sin_t
+        d_star = -c * sin_t + d * cos_t
+
+        psi1 = np.arctan2(c_star[0], a_star[0])
+        cos_p, sin_p = np.cos(psi1), np.sin(psi1)
+        a_norm = cos_p * a_star + sin_p * c_star
+        b_norm = cos_p * b_star + sin_p * d_star
+        c_norm = -sin_p * a_star + cos_p * c_star
+        d_norm = -sin_p * b_star + cos_p * d_star
+
+        # scale: the semi-major axis of the (axis-aligned) 1st harmonic
+        scale = np.sqrt(a_norm[0] ** 2 + c_norm[0] ** 2) + 1e-12
+        coeffs = np.stack([a_norm, b_norm, c_norm, d_norm], axis=-1).ravel() / scale  # a1,b1,c1,d1,a2,...
+        feats.append(coeffs[3:])  # a_1 (=1), b_1 (=0), c_1 (=0) carry no shape information
+    return np.vstack(feats)
+
+
+def _efd_labels(order):
+    return np.hstack(['EFD_d_1'] + [lab for n in range(2, order + 1)
+                                    for lab in ('EFD_a_%d' % n, 'EFD_b_%d' % n, 'EFD_c_%d' % n, 'EFD_d_%d' % n)])
+
+
 def compute_boundary_morphology_features(boundaries, imshape, 
                                          all_feats_compute=True,
                                          contour_curve_feats=True,
@@ -828,6 +903,8 @@ def compute_boundary_morphology_features(boundaries, imshape,
                                          pixel_xy_res=1.,
                                          timesample=None,
                                          fourier_remove_closing_point=False,
+                                         elliptic_fourier_features=True,
+                                         elliptic_fourier_order=10,
                                          fast=True,
                                          n_jobs=1):
     """ Master function for extracting all shape-based features described in the SAM paper.
@@ -886,7 +963,7 @@ def compute_boundary_morphology_features(boundaries, imshape,
 
     """
     if fast:
-        return compute_boundary_morphology_features_fast(boundaries, imshape, all_feats_compute=all_feats_compute, contour_curve_feats=contour_curve_feats, curve_order=curve_order, curve_err=curve_err, geom_features=geom_features, morph_features=morph_features, fourier_features=fourier_features, ect_features=ect_features, shape_context_features=shape_context_features, norm_scm=norm_scm, n_ref_pts_scm=n_ref_pts_scm, pixel_xy_res=pixel_xy_res, timesample=timesample, fourier_remove_closing_point=fourier_remove_closing_point, n_jobs=n_jobs)
+        return compute_boundary_morphology_features_fast(boundaries, imshape, all_feats_compute=all_feats_compute, contour_curve_feats=contour_curve_feats, curve_order=curve_order, curve_err=curve_err, geom_features=geom_features, morph_features=morph_features, fourier_features=fourier_features, ect_features=ect_features, shape_context_features=shape_context_features, norm_scm=norm_scm, n_ref_pts_scm=n_ref_pts_scm, pixel_xy_res=pixel_xy_res, timesample=timesample, fourier_remove_closing_point=fourier_remove_closing_point, elliptic_fourier_features=elliptic_fourier_features, elliptic_fourier_order=elliptic_fourier_order, n_jobs=n_jobs)
 
     # =============================================================================
     #   Given boundaries produced from the organoid tracker, compute shape morphology and boundary features of interest.
@@ -1054,6 +1131,15 @@ def compute_boundary_morphology_features(boundaries, imshape,
                     all_feats.append(cnt_fourier)
                     all_feats_labels.append(cnt_fourier_labels)
                     all_feats_norm_bool.append(np.hstack([True]*len(cnt_fourier)))
+
+                """
+                feature set 4b: elliptic Fourier descriptor features (as pip SAM-SPOT 0.1.1).
+                """
+                if elliptic_fourier_features:
+                    cnt_efd = compute_elliptic_fourier_feats([boundary_ii_tt], order=elliptic_fourier_order, pixel_xy_res=pixel_xy_res).ravel()
+                    all_feats.append(cnt_efd)
+                    all_feats_labels.append(_efd_labels(elliptic_fourier_order))
+                    all_feats_norm_bool.append(np.hstack([True]*len(cnt_efd)))
 
 
                 """
@@ -1984,6 +2070,45 @@ def _curl_vector_flow(im, *args):
     return curl
     
     
+
+def _shear_vector_flow(im, *args):
+    """ The shear-rate magnitude of a 2D or 3D vector field (as pip SAM-SPOT 0.1.1).
+
+    The velocity gradient tensor splits into rotation (curl, _curl_vector_flow), isotropic dilation (divergence,
+    _div_vector_flow) and the deviatoric shear / stretching that neither captures. This returns the scalar shear-rate
+    invariant sqrt(2 sum D_ij^2) of the deviatoric (traceless symmetric) strain-rate tensor D = E - tr(E)/n I, where E is
+    the symmetric part of the velocity gradient and n the number of dimensions.
+
+    Parameters
+    ----------
+    im : numpy array
+        (nrows, ncols, 2) or (n_z, nrows, ncols, 3), last channel the (x,y) or (x,y,z) vectors
+    args :
+        optional arguments passed to np.gradient
+
+    Returns
+    -------
+    shear : numpy array
+        (nrows, ncols) or (n_z, nrows, ncols) shear-rate magnitude
+    """
+    dim = im.shape[-1]
+    if dim == 2:
+        dFx_dy, dFx_dx = np.gradient(im[..., 0], *args)
+        dFy_dy, dFy_dx = np.gradient(im[..., 1], *args)
+        Exy = 0.5 * (dFx_dy + dFy_dx)
+        Dxx = 0.5 * (dFx_dx - dFy_dy)  # deviatoric: Dxx = (Exx - Eyy) / 2, Dyy = -Dxx, Dxy = Exy
+        return 2. * np.sqrt(Dxx ** 2 + Exy ** 2)
+    dFx_dz, dFx_dy, dFx_dx = np.gradient(im[..., 0], *args)
+    dFy_dz, dFy_dy, dFy_dx = np.gradient(im[..., 1], *args)
+    dFz_dz, dFz_dy, dFz_dx = np.gradient(im[..., 2], *args)
+    Exy = 0.5 * (dFx_dy + dFy_dx)
+    Exz = 0.5 * (dFx_dz + dFz_dx)
+    Eyz = 0.5 * (dFy_dz + dFz_dy)
+    div = dFx_dx + dFy_dy + dFz_dz
+    Dxx, Dyy, Dzz = dFx_dx - div / 3., dFy_dy - div / 3., dFz_dz - div / 3.
+    return np.sqrt(2. * (Dxx ** 2 + Dyy ** 2 + Dzz ** 2) + 4. * (Exy ** 2 + Exz ** 2 + Eyz ** 2))
+
+
 def _div_vector_flow(im, *args):
     
     """Computes the divergence of a vector field given as a 2D or 3D vector data.
@@ -2046,7 +2171,8 @@ def compute_boundary_motion_features(vid_flow,
                                      masked_sift_resize='cap',
                                      masks=None,
                                      fast=True,
-                                     n_jobs=1):
+                                     n_jobs=1,
+                                     shear_features=True):
     """ Compute the Motion features for given tracked organoid contour boundaries. Can only computed for a video as opposed to shape and appearance. 
 
     Parameters
@@ -2093,6 +2219,11 @@ def compute_boundary_motion_features(vid_flow,
         docstring); False runs the original implementation.
     n_jobs : int
         number of parallel processes over objects / frames of the fast implementation (joblib, -1 = all CPUs)
+    shear_features : bool
+        if True (default), add the shear-rate features of pip SAM-SPOT 0.1.1: the deviatoric shear-rate magnitude of the
+        flow (_shear_vector_flow; complements curl = rotation and divergence = dilation), as 'mean/stddev_shear_global_flow'
+        after the divergence statistics and as 'shear_sift_*' descriptors after 'div_sift_*' (masked / unmasked as the
+        curl and divergence SIFT). False gives the features without them.
     Returns
     -------
     out_array : (n_organoids, n_frames, n_features) array
@@ -2104,7 +2235,7 @@ def compute_boundary_motion_features(vid_flow,
 
     """
     if fast:
-        return compute_boundary_motion_features_fast(vid_flow, boundaries, compute_all_feats=compute_all_feats, compute_global_feats=compute_global_feats, compute_contour_feats=compute_contour_feats, n_contour_feat_bins=n_contour_feat_bins, cnt_sigma=cnt_sigma, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start, pixel_res=pixel_res, time_res=time_res, compute_sift_feats=compute_sift_feats, siftshape=siftshape, timesample=timesample, use_mask=use_mask, masked_sift_resize=masked_sift_resize, masks=masks, n_jobs=n_jobs)
+        return compute_boundary_motion_features_fast(vid_flow, boundaries, compute_all_feats=compute_all_feats, compute_global_feats=compute_global_feats, compute_contour_feats=compute_contour_feats, n_contour_feat_bins=n_contour_feat_bins, cnt_sigma=cnt_sigma, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start, pixel_res=pixel_res, time_res=time_res, compute_sift_feats=compute_sift_feats, siftshape=siftshape, timesample=timesample, use_mask=use_mask, masked_sift_resize=masked_sift_resize, masks=masks, n_jobs=n_jobs, shear_features=shear_features)
 
     # boundaries should be at least (n_orgs, timepoints, discretisation, 2)
     # vid_flow is (timepoints-1,  nrows, ncols, 2) (in x,y) format.
@@ -2141,6 +2272,8 @@ def compute_boundary_motion_features(vid_flow,
             # both are unitless except by /time.
             curl_vid_frame = _curl_vector_flow(flow_frame)[...,-1] / float(time_res) # in 2d only last channel # this is the correct unit.
             div_vid_frame = _div_vector_flow(flow_frame) / float(time_res) # already corrected?
+            if shear_features:
+                shear_vid_frame = _shear_vector_flow(flow_frame) / float(time_res) # deviatoric shear rate
 
             boundary_ii_tt = boundary_ii[tt]
 
@@ -2172,6 +2305,8 @@ def compute_boundary_motion_features(vid_flow,
                         # get the cropped out divergence and curl magnitudes.
                         curl_vid_cnt = curl_vid_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy() # somewhat noisy but looks ok?
                         div_vid_cnt = div_vid_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy() # somewhat noisy but looks ok?
+                        if shear_features:
+                            shear_vid_cnt = shear_vid_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy()
 
                         cnt_binary = cnt_binary = sktform.resize(cnt_binary, output_shape=flow_vid_cnt.shape[:-1], order=0, preserve_range=True) > 0
 
@@ -2186,6 +2321,8 @@ def compute_boundary_motion_features(vid_flow,
                             flow_vid_cnt_fill = np.dstack([_fill_outside_mask_nearest(flow_vid_cnt[...,ch], cnt_binary) for ch in range(flow_vid_cnt.shape[-1])])
                             curl_vid_cnt = _curl_vector_flow(flow_vid_cnt_fill)[...,-1] / float(time_res)
                             div_vid_cnt = _div_vector_flow(flow_vid_cnt_fill) / float(time_res)
+                            if shear_features:
+                                shear_vid_cnt = _shear_vector_flow(flow_vid_cnt_fill) / float(time_res)
 
                         """
                         first get the central displacement between current and next timepoint.
@@ -2236,6 +2373,15 @@ def compute_boundary_motion_features(vid_flow,
                             all_feats_labels.append(np.hstack(['mean_divergence_global_flow',
                                                                'stddev_divergence_global_flow']))
                             all_feats_norm_bool.append(np.hstack([False]*2))
+
+                            if shear_features:
+                                mean_shear_mag = np.nanmean( shear_vid_cnt[cnt_binary>0])
+                                std_shear_mag = np.nanstd( shear_vid_cnt[cnt_binary>0])
+                                all_feats.append(np.hstack([mean_shear_mag,
+                                                            std_shear_mag]))
+                                all_feats_labels.append(np.hstack(['mean_shear_global_flow',
+                                                                   'stddev_shear_global_flow']))
+                                all_feats_norm_bool.append(np.hstack([False]*2))
 
                         """
                         second get the local spatial variation of speed between current and next timepoint.
@@ -2368,6 +2514,20 @@ def compute_boundary_motion_features(vid_flow,
                             all_feats.append(sift_texture)
                             all_feats_labels.append(sift_texture_labels)
                             all_feats_norm_bool.append(np.hstack([True]*len(sift_texture)))
+
+                            if shear_features:
+                                if use_mask:
+                                    sift_texture = _masked_sift_descriptor(shear_vid_cnt, cnt_binary, resize=masked_sift_resize, siftshape=siftshape)
+                                else:
+                                    siftextractor = SingleSiftExtractor(siftshape[0])
+                                    shear_vid_cnt_ = shear_vid_cnt.copy()
+                                    shear_vid_cnt_[cnt_binary==0] = 0 # the exterior
+                                    shear_vid_cnt_im = sktform.resize(shear_vid_cnt_, siftshape, preserve_range=True)
+                                    sift_texture = siftextractor.process_image(shear_vid_cnt_im).ravel()
+                                    sift_texture = sift_texture / (np.linalg.norm(sift_texture) + 1e-8)
+                                all_feats.append(sift_texture)
+                                all_feats_labels.append(np.hstack(['shear_sift_%s'%(str(iii+1)) for iii in np.arange(len(sift_texture))]))
+                                all_feats_norm_bool.append(np.hstack([True]*len(sift_texture)))
 
                         # contour_img_feats = np.hstack(contour_img_feats)
                         # contour_img_feats_labels = np.hstack(contour_img_feats_labels)
@@ -2848,6 +3008,13 @@ def _morphology_features_sample_fast(boundary_ii_tt, imshape, opts, pre=None):
         all_feats_labels.append(np.hstack(['Fourier_%s' %(str(f_ii+1)) for f_ii in range(len(cnt_fourier))]))
         all_feats_norm_bool.append(np.hstack([True]*len(cnt_fourier)))
 
+    if opts.get('elliptic_fourier_features', False):
+        order = opts.get('elliptic_fourier_order', 10)
+        cnt_efd = compute_elliptic_fourier_feats([boundary_ii_tt], order=order, pixel_xy_res=pixel_xy_res).ravel()
+        all_feats.append(cnt_efd)
+        all_feats_labels.append(_efd_labels(order))
+        all_feats_norm_bool.append(np.hstack([True]*len(cnt_efd)))
+
     if all_feats_compute==True or (all_feats_compute==False and opts['ect_features']==True):
         # as in the original, the binary comes from the morphological features block
         ect_feat = pre['ect'] if 'ect' in pre else _ect_fast(cnt_binary, _regular_directions(36, dims=2), T=32)
@@ -2899,7 +3066,9 @@ def compute_boundary_morphology_features_fast(boundaries, imshape,
                                               pixel_xy_res=1.,
                                               timesample=None,
                                               n_jobs=1,
-                                              fourier_remove_closing_point=False):
+                                              fourier_remove_closing_point=False,
+                                              elliptic_fourier_features=True,
+                                              elliptic_fourier_order=10):
     """ Fast variant of compute_boundary_morphology_features with the same parameters and outputs.
 
     The contour reorientation rasterises the shape in its bounding box instead of a full image canvas, the Euler characteristic transform builds its cubical complex with array operations and the shape context histograms use np.bincount. Objects can be processed in parallel.
@@ -2916,6 +3085,12 @@ def compute_boundary_morphology_features_fast(boundaries, imshape,
         if True, the Fourier features drop the repeated closing point of the contour, which makes them exactly invariant
         to rotation and to the contour start point (there is then one Fourier feature less). False (default) keeps the
         original features.
+    elliptic_fourier_features : bool
+        if True (default), add the normalised elliptic Fourier descriptors 'EFD_*' after the Fourier features
+        (compute_elliptic_fourier_feats; 4*elliptic_fourier_order-3 features, as in pip SAM-SPOT 0.1.1). Unlike the
+        Fourier features they keep the phase, i.e. shape asymmetry. False gives the features without them.
+    elliptic_fourier_order : int
+        number of harmonics of the elliptic Fourier descriptors
 
     Returns
     -------
@@ -2938,7 +3113,8 @@ def compute_boundary_morphology_features_fast(boundaries, imshape,
                 curve_err=curve_err, geom_features=geom_features, morph_features=morph_features,
                 fourier_features=fourier_features, ect_features=ect_features,
                 shape_context_features=shape_context_features, norm_scm=norm_scm, n_ref_pts_scm=n_ref_pts_scm,
-                pixel_xy_res=pixel_xy_res, fourier_remove_closing_point=fourier_remove_closing_point)
+                pixel_xy_res=pixel_xy_res, fourier_remove_closing_point=fourier_remove_closing_point,
+                elliptic_fourier_features=elliptic_fourier_features, elliptic_fourier_order=elliptic_fourier_order)
     per_obj = _run_fast_feature_chunks(_morphology_features_chunk_fast, len(boundaries), n_jobs,
                                        (boundaries, imshape, frames, opts))
     return _assemble_fast_features(per_obj, len(boundaries), len(frames))
@@ -3162,11 +3338,13 @@ def compute_boundary_texture_features_fast(vid, boundaries,
 
 
 def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_frame, boundary_ii_tt,
-                                 boundary_ii_tt_plus_1, opts, siftextractor, pre=None, sift_inputs=None):
+                                 boundary_ii_tt_plus_1, opts, siftextractor, pre=None, sift_inputs=None,
+                                 shear_vid_frame=None):
     """ motion features of one contour between two frames, as in compute_boundary_motion_features. Returns None where the original returns NaN.
 
     pre: optional dict of precomputed 'binary_bbox', regional 'tile' and 'sift' descriptors (list of 3, before L2 normalisation) (e.g. by the torch variant).
-    sift_inputs: if a list is given, the 3 resized images whose (unmasked) SIFT descriptors are needed are appended to it and the function returns before computing any feature.
+    sift_inputs: if a list is given, the 3 (4 with the shear) resized images whose (unmasked) SIFT descriptors are needed are appended to it and the function returns before computing any feature.
+    shear_vid_frame: the shear-rate frame (opts['shear_features']); computed from flow_frame if None.
     """
     import skimage.transform as sktform
 
@@ -3191,6 +3369,11 @@ def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_f
 
     curl_vid_cnt = curl_vid_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy()
     div_vid_cnt = div_vid_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy()
+    shear = opts.get('shear_features', False)
+    if shear:
+        if shear_vid_frame is None:
+            shear_vid_frame = _shear_vector_flow(flow_frame) / float(time_res)
+        shear_vid_cnt = shear_vid_frame[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1].copy()
 
     cnt_binary = sktform.resize(cnt_binary, output_shape=flow_vid_cnt.shape[:-1], order=0, preserve_range=True) > 0
     if fg_frame is not None:
@@ -3200,11 +3383,13 @@ def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_f
         flow_vid_cnt_fill = np.dstack([_fill_outside_mask_nearest(flow_vid_cnt[...,ch], cnt_binary) for ch in range(flow_vid_cnt.shape[-1])])
         curl_vid_cnt = _curl_vector_flow(flow_vid_cnt_fill)[...,-1] / float(time_res)
         div_vid_cnt = _div_vector_flow(flow_vid_cnt_fill) / float(time_res)
+        if shear:
+            shear_vid_cnt = _shear_vector_flow(flow_vid_cnt_fill) / float(time_res)
 
     if sift_inputs is not None:
         # only collect the resized images for the unmasked SIFT descriptors
         flow_vid_cnt_ = np.linalg.norm(flow_vid_cnt * pixel_res / float(time_res), axis=-1)
-        for sift_im in (flow_vid_cnt_, curl_vid_cnt, div_vid_cnt):
+        for sift_im in (flow_vid_cnt_, curl_vid_cnt, div_vid_cnt) + ((shear_vid_cnt,) if shear else ()):
             sift_im = sift_im.copy()
             sift_im[cnt_binary==0] = 0 # the exterior
             sift_inputs.append(sktform.resize(sift_im, siftshape, preserve_range=True))
@@ -3246,6 +3431,15 @@ def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_f
         all_feats_labels.append(np.hstack(['mean_divergence_global_flow',
                                            'stddev_divergence_global_flow']))
         all_feats_norm_bool.append(np.hstack([False]*2))
+
+        if shear:
+            mean_shear_mag = np.nanmean( shear_vid_cnt[cnt_binary>0])
+            std_shear_mag = np.nanstd( shear_vid_cnt[cnt_binary>0])
+            all_feats.append(np.hstack([mean_shear_mag,
+                                        std_shear_mag]))
+            all_feats_labels.append(np.hstack(['mean_shear_global_flow',
+                                               'stddev_shear_global_flow']))
+            all_feats_norm_bool.append(np.hstack([False]*2))
 
     if compute_all_feats==True or (compute_all_feats==False and opts['compute_contour_feats']==True):
         if 'tile' in pre:
@@ -3303,6 +3497,8 @@ def _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_f
         sift_images = [(flow_vid_cnt_, 'sift_motion_%s'),
                        (curl_vid_cnt, 'curl_sift_%s'),
                        (div_vid_cnt, 'div_sift_%s')]
+        if shear:
+            sift_images.append((shear_vid_cnt, 'shear_sift_%s'))
         for sift_k, (sift_im, sift_label) in enumerate(sift_images):
             if use_mask:
                 sift_texture = _masked_sift_descriptor(sift_im, cnt_binary, resize=opts['masked_sift_resize'], siftshape=siftshape)
@@ -3334,12 +3530,13 @@ def _motion_features_chunk_fast(obj_ids, vid_flow, boundaries, masks, frames, op
         flow_frame = np.asarray(vid_flow[tt]).copy()
         curl_vid_frame = _curl_vector_flow(flow_frame)[...,-1] / float(opts['time_res'])
         div_vid_frame = _div_vector_flow(flow_frame) / float(opts['time_res'])
+        shear_vid_frame = (_shear_vector_flow(flow_frame) / float(opts['time_res'])) if opts.get('shear_features', False) else None
         fg_frame = np.asarray(masks[tt]) > 0 if (opts['use_mask'] and masks is not None) else None
         for kk in todo:
             b_ii = obj_ids[kk]
             out[kk][jj] = _motion_features_sample_fast(flow_frame, curl_vid_frame, div_vid_frame, fg_frame,
                                                        boundaries[b_ii][tt], boundaries[b_ii][tt+1], opts,
-                                                       siftextractor)
+                                                       siftextractor, shear_vid_frame=shear_vid_frame)
     return out
 
 
@@ -3361,7 +3558,8 @@ def compute_boundary_motion_features_fast(vid_flow,
                                           use_mask=True,
                                           masked_sift_resize='cap',
                                           masks=None,
-                                          n_jobs=1):
+                                          n_jobs=1,
+                                          shear_features=True):
     """ Fast variant of compute_boundary_motion_features with the same parameters and outputs.
 
     Curl and divergence are computed once per frame instead of once per object and frame, the regional speed windows are built in the bounding box of the object instead of the full frame and the SIFT extractor is created once. Objects can be processed in parallel.
@@ -3394,7 +3592,7 @@ def compute_boundary_motion_features_fast(vid_flow,
                 compute_contour_feats=compute_contour_feats, n_contour_feat_bins=n_contour_feat_bins,
                 cnt_sigma=cnt_sigma, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start,
                 pixel_res=pixel_res, time_res=time_res, compute_sift_feats=compute_sift_feats, siftshape=siftshape,
-                use_mask=use_mask, masked_sift_resize=masked_sift_resize)
+                use_mask=use_mask, masked_sift_resize=masked_sift_resize, shear_features=shear_features)
     per_obj = _run_fast_feature_chunks(_motion_features_chunk_fast, len(boundaries), n_jobs,
                                        (vid_flow, boundaries, masks, frames, opts))
     return _assemble_fast_features(per_obj, len(boundaries), len(frames))

@@ -603,7 +603,9 @@ def compute_boundary_morphology_features_torch(boundaries, imshape,
                                                pixel_xy_res=1.,
                                                timesample=None,
                                                device=None,
-                                               fourier_remove_closing_point=False):
+                                               fourier_remove_closing_point=False,
+                                               elliptic_fourier_features=True,
+                                               elliptic_fourier_order=10):
     """ PyTorch variant of SPOT.Features.features.compute_boundary_morphology_features with the same parameters and outputs.
 
     The contour rasterisations (for the reorientation and the binary shape) and the Euler characteristic transform are
@@ -640,7 +642,8 @@ def compute_boundary_morphology_features_torch(boundaries, imshape,
                 curve_err=curve_err, geom_features=geom_features, morph_features=morph_features,
                 fourier_features=fourier_features, ect_features=ect_features,
                 shape_context_features=shape_context_features, norm_scm=norm_scm, n_ref_pts_scm=n_ref_pts_scm,
-                pixel_xy_res=pixel_xy_res, fourier_remove_closing_point=fourier_remove_closing_point)
+                pixel_xy_res=pixel_xy_res, fourier_remove_closing_point=fourier_remove_closing_point,
+                elliptic_fourier_features=elliptic_fourier_features, elliptic_fourier_order=elliptic_fourier_order)
     samples = _valid_samples(boundaries, frames)
     contours = [boundaries[b][tt] for b, jj, tt in samples]
 
@@ -789,7 +792,8 @@ def compute_boundary_motion_features_torch(vid_flow,
                                            use_mask=True,
                                            masked_sift_resize='cap',
                                            masks=None,
-                                           device=None):
+                                           device=None,
+                                           shear_features=True):
     """ PyTorch variant of SPOT.Features.features.compute_boundary_motion_features with the same parameters and outputs.
 
     Curl and divergence (once per frame), the contour masks and regional windows (identical rasterisation) and the
@@ -819,7 +823,7 @@ def compute_boundary_motion_features_torch(vid_flow,
                 compute_contour_feats=compute_contour_feats, n_contour_feat_bins=n_contour_feat_bins,
                 cnt_sigma=cnt_sigma, n_contours=n_contours, n_angles=n_angles, angle_start=angle_start,
                 pixel_res=pixel_res, time_res=time_res, compute_sift_feats=compute_sift_feats, siftshape=siftshape,
-                use_mask=use_mask, masked_sift_resize=masked_sift_resize)
+                use_mask=use_mask, masked_sift_resize=masked_sift_resize, shear_features=shear_features)
     samples = _valid_samples(boundaries, frames, need_next=True)
     contours = [boundaries[b][tt] for b, jj, tt in samples]
     fg = lambda tt: (np.asarray(masks[tt]) > 0) if (use_mask and masks is not None) else None
@@ -836,32 +840,36 @@ def compute_boundary_motion_features_torch(vid_flow,
     def frame_fields(tt):
         flow_frame = np.asarray(vid_flow[tt]).copy()
         curl, div = curl_div_torch(flow_frame, time_res, device=device)
-        return flow_frame, curl, div
+        # the shear rate on the CPU, as the other implementations (identical results)
+        shear = (sf._shear_vector_flow(flow_frame) / float(time_res)) if shear_features else None
+        return flow_frame, curl, div, shear
 
     siftextractor = sf.SingleSiftExtractor(siftshape[0])
     # pass 1: the images of the unmasked SIFT descriptors, batched on the device
     if (compute_all_feats or compute_sift_feats) and not use_mask:
         sift_ims, sift_k = [], []
         for tt in sorted(by_frame):
-            flow_frame, curl, div = frame_fields(tt)
+            flow_frame, curl, div, shear = frame_fields(tt)
             for k in by_frame[tt]:
                 b = samples[k][0]
                 n_before = len(sift_ims)
                 sf._motion_features_sample_fast(flow_frame, curl, div, fg(tt), boundaries[b][tt], boundaries[b][tt+1],
-                                                opts, siftextractor, pre=pre[k], sift_inputs=sift_ims)
+                                                opts, siftextractor, pre=pre[k], sift_inputs=sift_ims,
+                                                shear_vid_frame=shear)
                 if len(sift_ims) > n_before:
                     sift_k.append(k)
         if len(sift_ims) > 0:
-            sifts = sift_torch(np.stack(sift_ims), device=device).reshape(len(sift_k), 3, -1)
+            sifts = sift_torch(np.stack(sift_ims), device=device).reshape(len(sift_k), 4 if shear_features else 3, -1)
             for k, s3 in zip(sift_k, sifts):
                 pre[k]['sift'] = list(s3)
 
     # pass 2: all features
     per_obj = [[None] * len(frames) for _ in range(len(boundaries))]
     for tt in tqdm(sorted(by_frame)):
-        flow_frame, curl, div = frame_fields(tt)
+        flow_frame, curl, div, shear = frame_fields(tt)
         for k in by_frame[tt]:
             b, jj, _ = samples[k]
             per_obj[b][jj] = sf._motion_features_sample_fast(flow_frame, curl, div, fg(tt), boundaries[b][tt],
-                                                             boundaries[b][tt+1], opts, siftextractor, pre=pre[k])
+                                                             boundaries[b][tt+1], opts, siftextractor, pre=pre[k],
+                                                             shear_vid_frame=shear)
     return sf._assemble_fast_features(per_obj, len(boundaries), len(frames))

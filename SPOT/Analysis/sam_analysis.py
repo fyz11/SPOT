@@ -1062,7 +1062,7 @@ def get_SAM_feature_type(feature_names):
             feature_scope[name_ii] = 1 
         if 'zernike_moments' in name:
             feature_scope[name_ii] = 1
-        if 'Fourier' in name:
+        if 'Fourier' in name or name.startswith('EFD_'):
             feature_scope[name_ii] = 1
         if 'Shape_Context' in name:
             feature_scope[name_ii] = 2

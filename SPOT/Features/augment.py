@@ -153,7 +153,7 @@ def _feature_family(feature_fn):
 
 
 # the SIFT descriptors of the SAM features, named <prefix><bin>, bin = 1 .. 128
-SIFT_PREFIXES = ('sift_appear_', 'sift_motion_', 'curl_sift_', 'div_sift_')
+SIFT_PREFIXES = ('sift_appear_', 'sift_motion_', 'curl_sift_', 'div_sift_', 'shear_sift_')
 
 
 def sift_quarter_turn_permutation(use_mask=True, n_angles=8, n_cells=(4, 4)):
