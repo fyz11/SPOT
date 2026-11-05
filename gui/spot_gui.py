@@ -156,8 +156,8 @@ class ToolTip(object):
         self.tip = tk.Toplevel(self.widget)
         self.tip.wm_overrideredirect(True)
         self.tip.wm_geometry('+%d+%d' % (x, y))
-        tk.Label(self.tip, text=self.text, justify='left', background=TOOLTIP_BG, relief='solid', borderwidth=1,
-                 wraplength=380, font=('Segoe UI', 9)).pack(ipadx=4, ipady=2)
+        tk.Label(self.tip, text=self.text, justify='left', background=TOOLTIP_BG, foreground='black',
+                 relief='solid', borderwidth=1, wraplength=380, font=('Segoe UI', 9)).pack(ipadx=4, ipady=2)
 
     def hide(self, _=None):
         if self.tip:
