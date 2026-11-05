@@ -138,3 +138,4 @@ dmypy.json
 models/detect_CNN_model/
 # figures written by examples/SPOT_demo_new_features
 examples/output_new_features/
+.DS_Store
