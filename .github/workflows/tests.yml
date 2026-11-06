@@ -1,0 +1,26 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.9", "3.13"]  # oldest and newest supported (pyproject.toml)
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: ${{ matrix.python }}
+          activate-environment: true
+      # CPU build of PyTorch: the tests do not use a GPU, and it avoids the multi-GB CUDA wheels on Linux
+      - run: uv pip install --torch-backend cpu ".[test]"
+      - run: pytest tests -rs
